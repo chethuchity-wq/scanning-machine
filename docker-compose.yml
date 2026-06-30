@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  us-pipeline:
+    build: .
+    container_name: us-reporting-pipeline
+    restart: unless-stopped
+    environment:
+      - ORTHANC_URL=http://orthanc:8042
+      - ORTHANC_USERNAME=orthanc
+      - ORTHANC_PASSWORD=orthanc
+    volumes:
+      # Reports output - accessible from host
+      - ./reports:/app/reports
+      # Local DICOM files (optional - for folder mode)
+      - ./dicom_input:/app/dicom_input
+      # Config override
+      - ./config.py:/app/config.py
+    # For folder mode instead of watch:
+    # command: python pipeline.py folder /app/dicom_input
+
+  # Optional: Run Orthanc alongside (remove if you already have Orthanc running)
+  # orthanc:
+  #   image: orthancteam/orthanc:latest
+  #   ports:
+  #     - "8042:8042"   # REST API
+  #     - "4242:4242"   # DICOM port
+  #   volumes:
+  #     - orthanc_data:/var/lib/orthanc/db
+
+# volumes:
+#   orthanc_data:
