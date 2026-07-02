@@ -44,6 +44,8 @@ from orthanc_client import OrthancClient
 from extract_measurements import extract_from_sr, extract_from_image
 from ocr_extract import extract_measurements_ocr
 from report_generator import generate_report
+from scan_classifier import classify_scan, classify_scan_from_filename
+import fill_report as _fill_report
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +114,163 @@ def _deduplicate_measurements(measurements: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
+# ---------------------------------------------------------------------------
+# Measurement name → fill_report data-dict field mapper
+# ---------------------------------------------------------------------------
+
+# Maps lower-cased measurement names (or substrings) to fill_report.py data keys.
+# Checked in order; first match wins.
+_MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
+    # Obstetric biometrics
+    ("bi-parietal diameter", "bpd"),
+    ("biparietal diameter", "bpd"),
+    ("bpd", "bpd"),
+    ("head circumference", "hc"),
+    ("hc", "hc"),
+    ("femur length", "fl"),
+    ("femur", "fl"),
+    ("fl", "fl"),
+    ("abdominal circumference", "ac"),
+    ("ac", "ac"),
+    ("crown rump length", "crl"),
+    ("crl", "crl"),
+    ("nuchal translucency", "nt"),
+    (" nt ", "nt"),
+    ("nasal bone length", "nasal_bone_length"),
+    ("nasal bone", "nasal_bone"),
+    ("nuchal fold thickness", "nuchal_fold"),
+    ("nuchal fold", "nuchal_fold"),
+    ("humerus length", "hl"),
+    ("humerus", "hl"),
+    ("hl", "hl"),
+    ("tibia length", "tl"),
+    ("tibia", "tl"),
+    ("tl", "tl"),
+    ("radius length", "rl"),
+    ("radius", "rl"),
+    ("rl", "rl"),
+    ("fibula", "fib"),
+    ("ulna length", "ul"),
+    ("ulna", "ul"),
+    ("ul", "ul"),
+    ("cerebellar diameter", "tcd"),
+    ("tcd", "tcd"),
+    ("cisterna magna", "cisterna_magna"),
+    ("lateral ventricular atrium", "lvta"),
+    ("foot length", "foot_length"),
+    ("amniotic fluid index", "afi"),
+    ("afi", "afi"),
+    ("estimated foetal weight", "efw"),
+    ("estimated fetal weight", "efw"),
+    ("efw", "efw"),
+    ("foetal heart rate", "fhr"),
+    ("fetal heart rate", "fhr"),
+    ("heart rate", "fhr"),
+    ("fhr", "fhr"),
+    # Abdomen
+    ("liver span", "liver_size"),
+    ("liver", "liver_size"),
+    ("spleen length", "spleen_size"),
+    ("spleen", "spleen_size"),
+    ("right kidney", "right_kidney_size"),
+    ("rt kidney", "right_kidney_size"),
+    ("left kidney", "left_kidney_size"),
+    ("lt kidney", "left_kidney_size"),
+    ("uterus", "uterus_size"),
+    ("endometrial thickness", "endometrium_mm"),
+    ("endometrium", "endometrium_mm"),
+    ("right ovary", "right_ovary_size"),
+    ("rt ovary", "right_ovary_size"),
+    ("left ovary", "left_ovary_size"),
+    ("lt ovary", "left_ovary_size"),
+    ("prostate", "prostate_notes"),
+    # Doppler
+    ("right uterine artery", "doppler_right_pi"),
+    ("rt uterine artery", "doppler_right_pi"),
+    ("left uterine artery", "doppler_left_pi"),
+    ("lt uterine artery", "doppler_left_pi"),
+    ("umbilical artery", "doppler_umbilical_pi"),
+    ("middle cerebral artery", "doppler_mca_pi"),
+    ("mca", "doppler_mca_pi"),
+]
+
+
+def _measurement_to_field(name: str) -> str | None:
+    """Return the fill_report data key for a measurement name, or None."""
+    norm = name.lower().strip()
+    for fragment, field in _MEASUREMENT_FIELD_MAP:
+        if fragment in norm:
+            return field
+    return None
+
+
+def _build_docx_data(patient_info: dict, measurements: list[dict]) -> dict:
+    """
+    Build the data dict expected by fill_report.generate_report() from
+    DICOM patient info and extracted measurements.
+    """
+    data: dict = {
+        "patient_name": patient_info.get("patient_name", ""),
+        "age": patient_info.get("age", ""),
+        "date": patient_info.get("study_date", ""),
+        "ref_by": patient_info.get("referring_physician", ""),
+        # sex drives declaration pronoun: "F" → "her", "M" → "his"
+        "_sex": patient_info.get("sex", "F"),
+    }
+
+    for m in measurements:
+        field = _measurement_to_field(str(m.get("measurement_name", "")))
+        if field and field not in data:
+            val = m.get("value", "")
+            data[field] = str(val) if val is not None else ""
+
+    return data
+
+
+def generate_docx_from_dicom(
+    ds: pydicom.Dataset,
+    measurements: list[dict],
+    patient_info: dict,
+    filename: str = "",
+) -> Path | None:
+    """
+    Classify scan type from DICOM and generate the matching .docx report.
+
+    Classification order:
+      1. DICOM tags  (StudyDescription, ProtocolName, SeriesDescription)
+      2. OCR text    (keywords burned into ultrasound image pixels)
+      3. Measurements fingerprinting (which measurement names are present)
+      4. Filename    (fallback for offline / local files)
+
+    Returns:
+        Path to generated .docx, or None if scan type cannot be determined.
+    """
+    # --- Classify ---
+    scan_type, confidence, method = classify_scan(ds, measurements)
+
+    # Fallback: try filename if DICOM/OCR/fingerprint returned nothing
+    if scan_type == "unknown" and filename:
+        scan_type, confidence, method = classify_scan_from_filename(filename)
+
+    if scan_type == "unknown":
+        print(f"  [DOCX] Cannot determine scan type – skipping .docx generation")
+        return None
+
+    print(f"  [DOCX] Scan type: {scan_type!r} (confidence {confidence:.0%}, method: {method})")
+
+    # --- Build data dict ---
+    data = _build_docx_data(patient_info, measurements)
+
+    # --- Generate ---
+    try:
+        path = _fill_report.generate_report(scan_type, data)
+        print(f"  [DOCX] Saved: {path}")
+        return path
+    except Exception as e:
+        print(f"  [DOCX] Generation failed: {e}")
+        return None
+
+
 def extract_patient_info(ds: pydicom.Dataset) -> dict:
     """Extract patient and study info from DICOM dataset."""
     def safe(tag):
@@ -130,15 +289,35 @@ def extract_patient_info(ds: pydicom.Dataset) -> dict:
     except ValueError:
         dob = dob_raw
 
+    # PatientAge is stored as e.g. "024Y", "006M", "015D"
+    age_raw = safe((0x0010, 0x1010))   # PatientAge
+    if age_raw:
+        age = age_raw.rstrip("YyMmDd").lstrip("0") or age_raw  # "024Y" → "24"
+    elif dob_raw:
+        # Derive age from birth date + study date
+        try:
+            birth = datetime.strptime(dob_raw, "%Y%m%d")
+            study = datetime.strptime(study_date_raw, "%Y%m%d") if study_date_raw else datetime.today()
+            age = str((study - birth).days // 365)
+        except Exception:
+            age = ""
+    else:
+        age = ""
+
+    # PatientSex: "M", "F", or "O"
+    sex = safe((0x0010, 0x0040)).upper()  # PatientSex
+
     return {
         "patient_name": safe((0x0010, 0x0010)).replace("^", " "),
         "patient_id": safe((0x0010, 0x0020)),
+        "age": age,
+        "sex": sex,            # "M" or "F"
         "dob": dob,
         "study_date": study_date,
         "accession_no": safe((0x0008, 0x0050)),
         "modality": safe((0x0008, 0x0060)),
-        "description": safe((0x0008, 0x1030)) or safe((0x0008, 0x103E)),  # StudyDescription or SeriesDescription
-        "referring_physician": safe((0x0008, 0x0090)),
+        "description": safe((0x0008, 0x1030)) or safe((0x0008, 0x103E)),
+        "referring_physician": safe((0x0008, 0x0090)).replace("^", " "),
         "institution": safe((0x0008, 0x0080)),
     }
 
@@ -208,9 +387,18 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
         }
 
     report_path = generate_report(patient_info, all_measurements)
-    print(f"  Report: {report_path}")
-    print(f"{'='*60}\n")
+    print(f"  PDF report: {report_path}")
 
+    # Also generate a .docx report (auto-detect scan type)
+    # Use the last DICOM dataset for classification (SR or image)
+    try:
+        last_ds = client.get_instance_as_dataset(series_ids[-1]) if series_ids else None
+        if last_ds is not None:
+            generate_docx_from_dicom(last_ds, all_measurements, patient_info)
+    except Exception as e:
+        print(f"  [DOCX] Could not generate .docx: {e}")
+
+    print(f"{'='*60}\n")
     return report_path
 
 
@@ -275,11 +463,21 @@ def process_local_folder(folder_path: str) -> Path:
             "study_date": datetime.now().strftime("%Y-%m-%d"),
         }
 
-    # Generate report
+    # Generate PDF report
     report_path = generate_report(patient_info, all_measurements)
-    print(f"\n  Report saved: {report_path}")
-    print(f"{'='*60}\n")
+    print(f"\n  PDF report: {report_path}")
 
+    # Also generate a .docx report (auto-detect scan type from first DICOM file)
+    try:
+        first_ds = pydicom.dcmread(str(dcm_files[0]), force=True)
+        generate_docx_from_dicom(
+            first_ds, all_measurements, patient_info,
+            filename=dcm_files[0].name,
+        )
+    except Exception as e:
+        print(f"  [DOCX] Could not generate .docx: {e}")
+
+    print(f"{'='*60}\n")
     return report_path
 
 
