@@ -1,14 +1,23 @@
-# Ultrasound DICOM Reporting Pipeline
+---
+title: Ultrasound DICOM Reporting Pipeline
+description: Automated measurement extraction, scan classification, and clinical report generation from ultrasound DICOM files.
+ms.date: 2026-07-02
+ms.topic: overview
+---
 
-Automated measurement extraction and clinical report generation from ultrasound DICOM files. Connects to an Orthanc DICOM server, extracts radiologist measurements from Structured Reports and burned-in image annotations (OCR), compares against normal reference ranges, and generates PDF reports with abnormality flagging.
+## Overview
+
+Automated measurement extraction and clinical report generation from ultrasound DICOM files. Connects to an Orthanc DICOM server, extracts radiologist measurements from Structured Reports and burned-in image annotations (OCR), compares against normal reference ranges, and generates both PDF summary reports and doctor-fillable Word (.docx) reports.
 
 ## Features
 
 - **Orthanc Integration** — Pull studies directly from your Orthanc DICOM server via REST API. Watch for new scans and auto-generate reports.
 - **SR Extraction** — Parse DICOM Structured Reports for high-quality numeric measurements (liver size, kidney length, etc.)
 - **OCR Fallback** — Read burned-in text annotations from ultrasound pixel data using Tesseract OCR
+- **Scan Type Classification** — Automatically identify the ultrasound scan type (early pregnancy, NT scan, anomaly scan, growth scan, follicular study, abdomen/pelvis) from DICOM metadata, OCR text, or measurement fingerprinting
 - **Normal Range Comparison** — Adult reference values for liver, kidneys, spleen, gallbladder, pancreas, aorta, thyroid, and more
-- **PDF Report Generation** — Professional clinical reports with measurements table, color-coded status (Normal/HIGH/LOW), findings section, and signature area
+- **PDF Report Generation** — Clinical summary reports with measurements table, color-coded status (Normal/HIGH/LOW), findings section, and signature area
+- **Word (.docx) Report Generation** — Scan-specific fillable report templates pre-populated with objective measurements; impression and clinical findings are always left blank for the doctor to complete
 - **Local Folder Processing** — Works with USB/network exports without requiring Orthanc connection
 
 ## Architecture
@@ -21,11 +30,13 @@ Orthanc Server (or local folder)
 │  pipeline.py     │  ← Orchestrator (watch/study/folder/list/search)
 └──────────────────┘
         │
-        ├──► orthanc_client.py     — REST API client
+        ├──► orthanc_client.py       — REST API client
         ├──► extract_measurements.py — SR + private tag extraction
-        ├──► ocr_extract.py        — Tesseract OCR on pixel data
-        ├──► normal_ranges.py      — Reference range database
-        └──► report_generator.py   — PDF output (fpdf2)
+        ├──► ocr_extract.py          — Tesseract OCR on pixel data
+        ├──► normal_ranges.py        — Reference range database
+        ├──► report_generator.py     — PDF output (fpdf2)
+        ├──► scan_classifier.py      — 3-layer scan type auto-detection
+        └──► fill_report.py          — Word (.docx) report generation
 ```
 
 ## Setup
@@ -139,6 +150,32 @@ If SR data is available, OCR is skipped (SR is definitive).
 
 Reference values are based on standard adult radiology textbooks. Pediatric and obstetric ranges are not included (can be added to `normal_ranges.py`).
 
+## Word Report Generation
+
+`fill_report.py` generates scan-specific `.docx` reports directly from DICOM data. Each report is pre-filled with objective measurements extracted from the scan; the **Impression** section and all clinical assessment fields are always left blank for the doctor to complete in Word.
+
+### Supported report types
+
+| Scan type | Report |
+|---|---|
+| Early pregnancy | Dating, crown-rump length, cardiac activity |
+| NT scan | Nuchal translucency, nasal bone, fetal biometry |
+| Anomaly scan | Full fetal anatomy survey |
+| Growth scan | Biometry, EFW, placenta, liquor |
+| Follicular study | Daily follicle tracking table |
+| Abdomen/Pelvis — Female | Liver, kidneys, uterus, ovaries, free fluid |
+| Abdomen/Pelvis — Male | Liver, kidneys, prostate, free fluid |
+
+Reports are saved to `reports/filled/` and named `<PatientName>_<scan_type>_<date>.docx`.
+
+### Scan type classification
+
+`scan_classifier.py` detects the scan type automatically using three layers:
+
+1. **DICOM metadata** — `StudyDescription`, `ProtocolName`, `SeriesDescription`
+2. **OCR** — Tesseract reads burned-in text from the image pixels
+3. **Measurement fingerprinting** — Infers type from which measurements are present (e.g. NT + CRL → NT scan)
+
 ## File Structure
 
 ```
@@ -149,6 +186,8 @@ scanning-machine/
 ├── ocr_extract.py            # OCR burned-in annotation extraction
 ├── normal_ranges.py          # Normal reference ranges database
 ├── report_generator.py       # PDF report generation
+├── scan_classifier.py        # Scan type auto-detection (3-layer)
+├── fill_report.py            # Word (.docx) report generation
 ├── pipeline.py               # Main entry point / orchestrator
 ├── read_dicom.py             # Original Excel-based extractor
 ├── requirements.txt          # Python dependencies
