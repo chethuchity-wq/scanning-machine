@@ -16,5 +16,8 @@ Pillow>=10.0.0
 # PDF report generation
 fpdf2>=2.7.0
 
+# Word (.docx) report generation
+python-docx>=1.1.0
+
 # Optional: better image processing for OCR
 # opencv-python>=4.8.0
