@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Ultrasound Reporting{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  {% if user %}
+  <nav class="topnav">
+    <span class="brand">Ultrasound Reporting</span>
+    <a href="/">Worklist</a>
+    <a href="/settings">Settings</a>
+    {% if user.role == "admin" %}<a href="/users">Users</a>{% endif %}
+    <span class="spacer"></span>
+    <a href="/account">{{ user.username }}</a>
+    <a href="/logout">Log out</a>
+  </nav>
+  {% endif %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

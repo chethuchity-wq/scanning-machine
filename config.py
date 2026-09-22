@@ -24,6 +24,15 @@ DICOM_CACHE_DIR = "dicom_cache"    # Temp folder for downloaded DICOM files
 # ---------------------------------------------------------------------------
 POLL_INTERVAL_SECONDS = 10          # How often to check Orthanc for new studies
 STABLE_STUDY_TIMEOUT = 30           # Seconds to wait after last instance before processing
+WATCH_STATE_FILE = "watch_state.json"  # Persists watch mode's position across restarts
+MAX_REPORT_IMAGES = 6                # Max representative scan images embedded per report
+HEARTBEAT_URL = ""                   # Dead-man's-switch ping URL (e.g. healthchecks.io) - see config_local.example.py
+
+# ---------------------------------------------------------------------------
+# Dashboard (webapp/)
+# ---------------------------------------------------------------------------
+DB_PATH = "data/app.db"                        # Worklist/clinic-settings database
+SESSION_SECRET_FILE = "data/session_secret.txt"  # Auto-generated on first run
 
 # ---------------------------------------------------------------------------
 # OCR Settings
@@ -48,3 +57,15 @@ CLINIC_ADDRESS = "Your Clinic Address Here"
 CLINIC_PHONE = "+91-XXXXXXXXXX"
 CLINIC_LOGO = None                  # Path to clinic logo PNG (optional)
 REPORT_FONT = "Helvetica"
+
+# ---------------------------------------------------------------------------
+# Local overrides
+# ---------------------------------------------------------------------------
+# Machine-specific secrets/settings (real Orthanc credentials, real clinic
+# info) live in config_local.py, which is gitignored and never touched by
+# `git pull`. Copy config_local.example.py to config_local.py on each
+# deployed machine and fill it in. See README for details.
+try:
+    from config_local import *  # noqa: F401,F403
+except ImportError:
+    pass

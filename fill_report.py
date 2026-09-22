@@ -29,6 +29,7 @@ Usage (programmatic):
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -184,6 +185,28 @@ def _doppler_table(doc: Document, rows: list[tuple[str, str]]) -> None:
         table.rows[i].cells[1].text = pi
 
 
+def _add_images_section(doc: Document, images: list[bytes] | None, images_per_row: int = 2) -> None:
+    """Append a grid of representative ultrasound scan images, if any were provided."""
+    if not images:
+        return
+
+    doc.add_paragraph()
+    _heading(doc, "ULTRASOUND IMAGES", size=11, center=False)
+
+    image_width = Inches(2.7)
+    for row_start in range(0, len(images), images_per_row):
+        row_images = images[row_start:row_start + images_per_row]
+        table = doc.add_table(rows=1, cols=images_per_row)
+        for col, img_bytes in enumerate(row_images):
+            paragraph = table.rows[0].cells[col].paragraphs[0]
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = paragraph.add_run()
+            try:
+                run.add_picture(io.BytesIO(img_bytes), width=image_width)
+            except Exception:
+                continue
+
+
 def _declaration(doc: Document, patient_name: str, sex: str = "F") -> None:
     """sex: 'F' → her/Mrs, 'M' → his/Mr, anything else → their/the patient."""
     if sex == "M":
@@ -213,14 +236,46 @@ def _doctor_signature(doc: Document, right_align: bool = True) -> None:
     p.add_run(f"{DOCTOR_NAME}\n{DOCTOR_QUAL}").bold = False
 
 
-def _save(doc: Document, patient_name: str, scan_type: str) -> Path:
+def _non_clobbering_path(path: Path) -> Path:
+    """
+    Return `path`, or the first free `name_2.docx`, `name_3.docx`, ... variant
+    if it is already taken.
+
+    Reports are NEVER overwritten. The doctor edits the generated .docx in
+    place and saves over it, so an overwrite silently destroys a completed,
+    signed report - and the pipeline can legitimately re-run on the same
+    patient (a second scan the same day, or Orthanc re-firing StableStudy
+    when late instances arrive for an already-processed study).
+    """
+    if not path.exists():
+        return path
+    for n in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Could not find a free filename for {path}")
+
+
+def _save(doc: Document, patient_name: str, scan_type: str, date: str = "") -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = "".join(c for c in patient_name if c.isalnum() or c in " ._-").strip()
-    date_str = datetime.today().strftime("%Y%m%d")
+    # Prefer the report's own date over today's - a study processed the day
+    # after it was acquired should still be filed under the scan date.
+    date_str = _date_for_filename(date)
     filename = f"{safe_name}_{scan_type}_{date_str}.docx"
-    path = OUTPUT_DIR / filename
+    path = _non_clobbering_path(OUTPUT_DIR / filename)
     doc.save(path)
     return path
+
+
+def _date_for_filename(date: str) -> str:
+    """Normalize a report date to YYYYMMDD, falling back to today."""
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y%m%d"):
+        try:
+            return datetime.strptime(date.strip(), fmt).strftime("%Y%m%d")
+        except (ValueError, AttributeError):
+            continue
+    return datetime.today().strftime("%Y%m%d")
 
 
 # ---------------------------------------------------------------------------
@@ -287,8 +342,9 @@ def generate_early_pregnancy_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
-    return _save(doc, d.get("patient_name", "patient"), "early_pregnancy")
+    return _save(doc, d.get("patient_name", "patient"), "early_pregnancy", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -369,8 +425,9 @@ def generate_nt_scan_report(data: dict) -> Path:
     doc.add_paragraph()
     _small_note(doc, NT_NOTE)
     _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
-    return _save(doc, d.get("patient_name", "patient"), "nt_scan")
+    return _save(doc, d.get("patient_name", "patient"), "nt_scan", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -507,8 +564,9 @@ def generate_anomaly_scan_report(data: dict) -> Path:
     doc.add_paragraph()
     _small_note(doc, ANOMALY_NOTE)
     _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
-    return _save(doc, d.get("patient_name", "patient"), "anomaly_scan")
+    return _save(doc, d.get("patient_name", "patient"), "anomaly_scan", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -610,8 +668,9 @@ def generate_growth_scan_report(data: dict) -> Path:
         ("Umbilical artery", d.get("doppler_umbilical_pi", "")),
         ("MCA flow", d.get("doppler_mca_pi", "")),
     ])
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
-    return _save(doc, d.get("patient_name", "patient"), "growth_scan")
+    return _save(doc, d.get("patient_name", "patient"), "growth_scan", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -687,8 +746,9 @@ def generate_follicular_study_report(data: dict) -> Path:
         cells[3].text = str(row_data.get("left_follicle", ""))
         cells[4].text = str(row_data.get("free_fluid", ""))
 
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
-    return _save(doc, d.get("patient_name", "patient"), "follicular_study")
+    return _save(doc, d.get("patient_name", "patient"), "follicular_study", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -765,9 +825,10 @@ def generate_abdomen_pelvis_female_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _small_note(doc, STANDARD_NOTE)
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
 
-    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_female")
+    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_female", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -840,9 +901,10 @@ def generate_abdomen_pelvis_male_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _small_note(doc, STANDARD_NOTE)
+    _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc)
 
-    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_male")
+    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_male", d.get("date", ""))
 
 
 # ---------------------------------------------------------------------------

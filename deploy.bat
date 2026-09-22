@@ -18,12 +18,17 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo [*] Building container...
-docker-compose build
+echo [*] Building and starting container (detached, auto-restarts on crash/reboot)...
+docker-compose up -d --build
 
 echo.
-echo [*] Starting pipeline in watch mode...
-echo     Reports will be saved to: .\reports\
-echo     Press Ctrl+C to stop.
+docker-compose ps
 echo.
-docker-compose up
+echo [OK] Pipeline is running in the background.
+echo      Reports will be saved to: .\reports\
+echo.
+echo      View live logs:   docker-compose logs -f
+echo      Stop the service:  docker-compose down
+echo      Re-run this script any time to deploy an updated version.
+echo.
+pause

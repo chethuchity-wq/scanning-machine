@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<h1>Your Account</h1>
+<p class="hint">Logged in as <strong>{{ user.username }}</strong></p>
+
+<h2>Change password</h2>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if saved %}<p class="success">Password updated.</p>{% endif %}
+<form method="post" action="/account">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Current password <input type="password" name="current_password" required></label>
+  <label>New password <input type="password" name="new_password" required minlength="8"></label>
+  <button type="submit">Update password</button>
+</form>
+{% endblock %}

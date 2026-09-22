@@ -13,9 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY *.py ./
+COPY webapp/ ./webapp/
 
 # Create output directories
-RUN mkdir -p reports measurements dicom_cache
+RUN mkdir -p reports measurements dicom_cache data
 
 # Default: watch mode
 CMD ["python", "pipeline.py", "watch"]

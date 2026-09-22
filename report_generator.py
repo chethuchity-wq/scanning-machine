@@ -22,6 +22,7 @@ Usage:
     generate_report(patient_info, measurements, output_path="report.pdf")
 """
 
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -39,30 +40,44 @@ from normal_ranges import evaluate_measurement, find_normal_range
 class UltrasoundReportPDF(FPDF):
     """Custom PDF with header/footer for ultrasound reports."""
 
-    def __init__(self, patient_info: dict):
+    def __init__(self, patient_info: dict, clinic_info: dict = None):
         super().__init__()
         self.patient_info = patient_info
+        # clinic_info lets callers (e.g. the dashboard's DB-backed settings)
+        # override the branding shown on the report; falls back to config.py
+        # for existing CLI-only usage.
+        self.clinic_info = clinic_info or {
+            "name": config.CLINIC_NAME,
+            "address": config.CLINIC_ADDRESS,
+            "phone": config.CLINIC_PHONE,
+            "logo_path": config.CLINIC_LOGO,
+        }
         self.set_auto_page_break(auto=True, margin=25)
 
     def header(self):
+        clinic_name = self.clinic_info.get("name") or config.CLINIC_NAME
+        clinic_address = self.clinic_info.get("address") or config.CLINIC_ADDRESS
+        clinic_phone = self.clinic_info.get("phone") or config.CLINIC_PHONE
+        clinic_logo = self.clinic_info.get("logo_path") or config.CLINIC_LOGO
+
         # Clinic logo (if configured)
-        if config.CLINIC_LOGO and Path(config.CLINIC_LOGO).exists():
-            self.image(config.CLINIC_LOGO, 10, 8, 20)
+        if clinic_logo and Path(clinic_logo).exists():
+            self.image(clinic_logo, 10, 8, 20)
             self.set_x(35)
         else:
             self.set_x(10)
 
         # Clinic name
         self.set_font("Helvetica", "B", 16)
-        self.cell(0, 7, config.CLINIC_NAME, new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 7, clinic_name, new_x="LMARGIN", new_y="NEXT")
 
         # Clinic address & phone
         self.set_font("Helvetica", "", 9)
         self.set_text_color(100, 100, 100)
-        if config.CLINIC_ADDRESS:
-            self.cell(0, 4, config.CLINIC_ADDRESS, new_x="LMARGIN", new_y="NEXT")
-        if config.CLINIC_PHONE:
-            self.cell(0, 4, f"Phone: {config.CLINIC_PHONE}", new_x="LMARGIN", new_y="NEXT")
+        if clinic_address:
+            self.cell(0, 4, clinic_address, new_x="LMARGIN", new_y="NEXT")
+        if clinic_phone:
+            self.cell(0, 4, f"Phone: {clinic_phone}", new_x="LMARGIN", new_y="NEXT")
 
         self.set_text_color(0, 0, 0)
 
@@ -317,6 +332,44 @@ def _add_findings_section(pdf: UltrasoundReportPDF, measurements: list[dict]):
     pdf.set_text_color(0, 0, 0)
 
 
+def _add_images_section(pdf: UltrasoundReportPDF, images: list[bytes]):
+    """Add a grid of representative ultrasound scan images, 2 per row."""
+    if not images:
+        return
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_fill_color(0, 102, 153)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 7, "  ULTRASOUND IMAGES", fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
+
+    left_margin = 10
+    col_width = 90
+    col_gap = 10
+    row_height = 68
+    row_y = pdf.get_y()
+
+    for i, img_bytes in enumerate(images):
+        col = i % 2
+        if col == 0:
+            # Advance past the row just drawn before starting a new one -
+            # without this every row lands on the same y and the images
+            # render stacked on top of each other.
+            if i > 0:
+                row_y += row_height
+            if row_y + row_height > pdf.page_break_trigger:
+                pdf.add_page()
+                row_y = pdf.get_y()
+        x = left_margin + col * (col_width + col_gap)
+        try:
+            pdf.image(io.BytesIO(img_bytes), x=x, y=row_y, w=col_width, h=row_height - 6)
+        except Exception:
+            continue
+
+    pdf.set_y(row_y + row_height)
+
+
 def _add_signature_section(pdf: UltrasoundReportPDF):
     """Add signature area at bottom."""
     pdf.ln(15)
@@ -340,10 +393,27 @@ def _add_signature_section(pdf: UltrasoundReportPDF):
 # Main generation function
 # ---------------------------------------------------------------------------
 
+def _non_clobbering_path(path: Path) -> Path:
+    """
+    Return `path`, or the first free `name_2.pdf`, `name_3.pdf`, ... variant
+    if it is already taken, so a second study for the same patient on the
+    same day cannot silently replace the first one's report.
+    """
+    if not path.exists():
+        return path
+    for n in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Could not find a free filename for {path}")
+
+
 def generate_report(
     patient_info: dict,
     measurements: list[dict],
     output_path: str = None,
+    images: list[bytes] = None,
+    clinic_info: dict = None,
 ) -> Path:
     """
     Generate a PDF ultrasound report.
@@ -353,6 +423,11 @@ def generate_report(
         measurements: List of measurement dicts from SR/OCR extraction.
             Each dict: measurement_name, value, unit, context
         output_path: Output PDF path (default: auto-generated in config.OUTPUT_DIR)
+        images: Optional list of PNG image bytes (e.g. from image_extract.py)
+            to embed as a representative-images section
+        clinic_info: Optional dict (name, address, phone, logo_path) overriding
+            the clinic branding shown in the report header; falls back to
+            config.py's CLINIC_* settings if not given
 
     Returns:
         Path to the generated PDF file
@@ -362,10 +437,15 @@ def generate_report(
         output_dir = Path(config.OUTPUT_DIR)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        patient_name = patient_info.get("patient_name", "unknown").replace(" ", "_").replace("^", "_")
+        raw_name = patient_info.get("patient_name", "unknown").replace("^", " ")
+        # Strip characters that are illegal in Windows filenames - DICOM
+        # PatientName is free text and a stray / or : makes the save fail.
+        patient_name = "".join(
+            c for c in raw_name if c.isalnum() or c in " ._-"
+        ).strip().replace(" ", "_") or "unknown"
         study_date = patient_info.get("study_date", datetime.now().strftime("%Y-%m-%d"))
         filename = f"US_Report_{patient_name}_{study_date}.pdf"
-        output_path = output_dir / filename
+        output_path = _non_clobbering_path(output_dir / filename)
     else:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -380,13 +460,14 @@ def generate_report(
     )
 
     # Build PDF
-    pdf = UltrasoundReportPDF(patient_info)
+    pdf = UltrasoundReportPDF(patient_info, clinic_info=clinic_info)
     pdf.alias_nb_pages()
     pdf.add_page()
 
     _add_patient_section(pdf, patient_info)
     _add_measurements_table(pdf, measurements_sorted)
     _add_findings_section(pdf, measurements_sorted)
+    _add_images_section(pdf, images or [])
     _add_signature_section(pdf)
 
     # Save

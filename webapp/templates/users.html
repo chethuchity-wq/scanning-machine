@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h1>Dashboard Users</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if added %}<p class="success">Account created.</p>{% endif %}
+
+<table class="worklist">
+  <thead>
+    <tr><th>Username</th><th>Role</th><th>Created</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.username }}</td>
+      <td>{{ u.role }}</td>
+      <td>{{ u.created_at.strftime("%Y-%m-%d") }}</td>
+      <td>
+        {% if users|length > 1 %}
+        <form method="post" action="/users/{{ u.id }}/delete" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button" onclick="return confirm('Remove this account?')">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Add a user</h2>
+<form method="post" action="/users">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Username <input type="text" name="username" required></label>
+  <label>Password <input type="password" name="password" required minlength="8"></label>
+  <button type="submit">Create account</button>
+</form>
+{% endblock %}

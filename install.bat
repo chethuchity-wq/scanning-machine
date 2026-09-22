@@ -63,6 +63,11 @@ if not exist "reports" mkdir reports
 if not exist "measurements" mkdir measurements
 if not exist "dicom_cache" mkdir dicom_cache
 
+REM --- Create local config override (holds real secrets, gitignored) ---
+if not exist "config_local.py" (
+    copy /Y "config_local.example.py" "config_local.py" >nul
+)
+
 echo.
 echo ============================================================
 echo   Setup Complete!
@@ -77,6 +82,8 @@ echo.
 echo   To list studies on Orthanc:
 echo     run.bat list
 echo.
-echo   Edit config.py to set your Orthanc server IP and clinic info.
+echo   Edit config_local.py to set your Orthanc server IP and clinic info.
+echo   (config_local.py is gitignored, so future "git pull" updates won't
+echo    touch it or overwrite your real credentials.)
 echo.
 pause

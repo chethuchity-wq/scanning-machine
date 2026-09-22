@@ -33,19 +33,33 @@ Usage:
 
 import argparse
 import io
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import pydicom
 
+# Progress output uses arrows and check marks; a Windows console defaults to
+# cp1252, which cannot encode them, and the pipeline would die mid-study with
+# a UnicodeEncodeError after the work was already done.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 import config
 from orthanc_client import OrthancClient
 from extract_measurements import extract_from_sr, extract_from_image
 from ocr_extract import extract_measurements_ocr
+from image_extract import dicom_to_png_bytes
 from report_generator import generate_report
 from scan_classifier import classify_scan, classify_scan_from_filename
 import fill_report as _fill_report
+from webapp import db as dashboard_db
+
+dashboard_db.init_db()
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +149,7 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
     ("crown rump length", "crl"),
     ("crl", "crl"),
     ("nuchal translucency", "nt"),
-    (" nt ", "nt"),
+    ("nt", "nt"),
     ("nasal bone length", "nasal_bone_length"),
     ("nasal bone", "nasal_bone"),
     ("nuchal fold thickness", "nuchal_fold"),
@@ -195,35 +209,162 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
 ]
 
 
+# Units each .docx template hardcodes next to the field (see fill_report.py:
+# "BPD: {bpd} cms", "endometrium thickness {endometrium_mm} mm", ...). A value
+# is converted into this unit before it is written, because the template's
+# unit is printed verbatim regardless of what the source measurement was in -
+# obstetric SR reports biometry in mm, so an unconverted BPD of 92mm would
+# print as "92 cms".
+_FIELD_UNITS: dict[str, str] = {
+    # printed as "cms" / "cm"
+    "bpd": "cm", "hc": "cm", "fl": "cm", "ac": "cm", "crl": "cm",
+    "hl": "cm", "tl": "cm", "rl": "cm", "fib": "cm", "ul": "cm",
+    "tcd": "cm", "cisterna_magna": "cm", "lvta": "cm", "foot_length": "cm",
+    "afi": "cm", "liver_size": "cm", "spleen_size": "cm",
+    "right_kidney_size": "cm", "left_kidney_size": "cm", "uterus_size": "cm",
+    "right_ovary_size": "cm", "left_ovary_size": "cm",
+    # printed as "mm"
+    "nt": "mm", "nasal_bone": "mm", "nasal_bone_length": "mm",
+    "nuchal_fold": "mm", "endometrium_mm": "mm",
+    # printed as "gms"
+    "efw": "g",
+    # printed as "BPM"
+    "fhr": "bpm",
+    # dimensionless - Doppler indices carry no unit in the template
+    "doppler_right_pi": "", "doppler_left_pi": "",
+    "doppler_umbilical_pi": "", "doppler_mca_pi": "",
+    "prostate_notes": "",
+}
+
+# Source unit strings (as they arrive from DICOM SR MeasurementUnitsCodeSequence
+# or OCR) normalized to a canonical unit and a multiplier into the base unit of
+# their dimension (mm for length, g for mass).
+_UNIT_ALIASES: dict[str, tuple[str, float]] = {
+    "mm": ("length", 1.0), "millimeter": ("length", 1.0),
+    "millimetre": ("length", 1.0), "mms": ("length", 1.0),
+    "cm": ("length", 10.0), "centimeter": ("length", 10.0),
+    "centimetre": ("length", 10.0), "cms": ("length", 10.0),
+    "m": ("length", 1000.0), "meter": ("length", 1000.0),
+    "g": ("mass", 1.0), "gm": ("mass", 1.0), "gms": ("mass", 1.0),
+    "gram": ("mass", 1.0), "grams": ("mass", 1.0),
+    "kg": ("mass", 1000.0), "kilogram": ("mass", 1000.0),
+    "bpm": ("rate", 1.0), "beats/min": ("rate", 1.0),
+    "beats per minute": ("rate", 1.0), "/min": ("rate", 1.0),
+    "min-1": ("rate", 1.0), "{h.b.}/min": ("rate", 1.0),
+}
+
+# Target unit -> (dimension, multiplier into the base unit)
+_TARGET_UNITS: dict[str, tuple[str, float]] = {
+    "mm": ("length", 1.0), "cm": ("length", 10.0),
+    "g": ("mass", 1.0), "bpm": ("rate", 1.0),
+}
+
+# Names that must never be auto-filled into a fetal biometry field.
+_MATERNAL_RE = re.compile(r"\bmaternal\b")
+# Derived values (ratios, percentiles, z-scores) share their name with the raw
+# biometry they are computed from - "HC/AC ratio" is not an HC measurement.
+_DERIVED_RE = re.compile(r"\b(ratio|percentile|centile|z[- ]?score|sd)\b")
+_FETAL_FIELDS = {
+    "bpd", "hc", "fl", "ac", "crl", "hl", "tl", "rl", "fib", "ul", "nt",
+    "tcd", "cisterna_magna", "lvta", "foot_length", "efw", "fhr",
+    "nasal_bone", "nasal_bone_length", "nuchal_fold",
+}
+
+# Pre-compiled word-boundary matchers, in the same priority order as the map.
+# Plain substring matching was unsafe here: two-letter abbreviations such as
+# "ac", "fl" and "ul" match inside ordinary words, so "Placental thickness"
+# landed in the abdominal-circumference field and "Free fluid" in femur length.
+_COMPILED_FIELD_MAP: list[tuple[object, str]] = [
+    (re.compile(r"\b" + re.escape(fragment.strip()) + r"\b"), field)
+    for fragment, field in _MEASUREMENT_FIELD_MAP
+]
+
+
 def _measurement_to_field(name: str) -> str | None:
     """Return the fill_report data key for a measurement name, or None."""
     norm = name.lower().strip()
-    for fragment, field in _MEASUREMENT_FIELD_MAP:
-        if fragment in norm:
+    if _DERIVED_RE.search(norm):
+        return None
+    for pattern, field in _COMPILED_FIELD_MAP:
+        if pattern.search(norm):
+            if field in _FETAL_FIELDS and _MATERNAL_RE.search(norm):
+                return None
             return field
     return None
 
 
-def _build_docx_data(patient_info: dict, measurements: list[dict]) -> dict:
+def _convert_to_field_unit(value, source_unit: str, field: str) -> str | None:
+    """
+    Convert a measurement into the unit its .docx field is labelled with.
+
+    Returns None when the conversion cannot be made with confidence (unknown
+    or missing source unit, mismatched dimension, non-numeric value). The
+    caller leaves the field blank in that case: an empty field the doctor
+    fills in is safe, a confidently-printed wrong number is not.
+    """
+    target = _FIELD_UNITS.get(field)
+    if target == "" or target is None:
+        # Dimensionless or free-text field - pass the value through as-is.
+        return str(value) if value is not None else None
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    src = str(source_unit or "").strip().lower().rstrip(".")
+    if src not in _UNIT_ALIASES:
+        return None
+
+    src_dim, src_factor = _UNIT_ALIASES[src]
+    tgt_dim, tgt_factor = _TARGET_UNITS[target]
+    if src_dim != tgt_dim:
+        return None
+
+    converted = numeric * src_factor / tgt_factor
+    # Trim to a clinically sensible precision without trailing zeros.
+    return f"{converted:.2f}".rstrip("0").rstrip(".")
+
+
+def _build_docx_data(
+    patient_info: dict,
+    measurements: list[dict],
+    images: list[bytes] = None,
+) -> dict:
     """
     Build the data dict expected by fill_report.generate_report() from
     DICOM patient info and extracted measurements.
+
+    Measurements whose unit cannot be reconciled with the template's are
+    left out and listed under "_unit_warnings" so the caller can flag the
+    report for review, rather than being printed under the wrong unit.
     """
     data: dict = {
         "patient_name": patient_info.get("patient_name", ""),
         "age": patient_info.get("age", ""),
         "date": patient_info.get("study_date", ""),
         "ref_by": patient_info.get("referring_physician", ""),
-        # sex drives declaration pronoun: "F" → "her", "M" → "his"
+        # sex drives declaration pronoun: "F" -> "her", "M" -> "his"
         "_sex": patient_info.get("sex", "F"),
+        "_images": images or [],
     }
+    warnings: list[str] = []
 
     for m in measurements:
-        field = _measurement_to_field(str(m.get("measurement_name", "")))
-        if field and field not in data:
-            val = m.get("value", "")
-            data[field] = str(val) if val is not None else ""
+        name = str(m.get("measurement_name", ""))
+        field = _measurement_to_field(name)
+        if not field or field in data:
+            continue
+        converted = _convert_to_field_unit(m.get("value"), m.get("unit", ""), field)
+        if converted is None:
+            warnings.append(
+                f"{name} ({m.get('value')} {m.get('unit') or 'no unit'}) "
+                f"-> {field} [{_FIELD_UNITS.get(field, '?')}]"
+            )
+            continue
+        data[field] = converted
 
+    data["_unit_warnings"] = warnings
     return data
 
 
@@ -232,7 +373,8 @@ def generate_docx_from_dicom(
     measurements: list[dict],
     patient_info: dict,
     filename: str = "",
-) -> Path | None:
+    images: list[bytes] = None,
+) -> tuple[Path | None, str | None, float]:
     """
     Classify scan type from DICOM and generate the matching .docx report.
 
@@ -243,7 +385,11 @@ def generate_docx_from_dicom(
       4. Filename    (fallback for offline / local files)
 
     Returns:
-        Path to generated .docx, or None if scan type cannot be determined.
+        (path, scan_type, confidence, dropped) - path is None if scan type
+        cannot be determined or generation fails; confidence is still
+        meaningful in that case (e.g. 0.0) for review-flagging purposes.
+        `dropped` counts measurements left out because their units could not
+        be reconciled with the template's.
     """
     # --- Classify ---
     scan_type, confidence, method = classify_scan(ds, measurements)
@@ -254,21 +400,64 @@ def generate_docx_from_dicom(
 
     if scan_type == "unknown":
         print(f"  [DOCX] Cannot determine scan type – skipping .docx generation")
-        return None
+        return None, scan_type, confidence, 0
 
     print(f"  [DOCX] Scan type: {scan_type!r} (confidence {confidence:.0%}, method: {method})")
 
     # --- Build data dict ---
-    data = _build_docx_data(patient_info, measurements)
+    data = _build_docx_data(patient_info, measurements, images=images)
+    dropped = data.get("_unit_warnings", [])
+    for warning in dropped:
+        print(f"  [DOCX] Left blank - cannot convert units: {warning}")
 
     # --- Generate ---
     try:
         path = _fill_report.generate_report(scan_type, data)
         print(f"  [DOCX] Saved: {path}")
-        return path
+        return path, scan_type, confidence, len(dropped)
     except Exception as e:
         print(f"  [DOCX] Generation failed: {e}")
-        return None
+        return None, scan_type, confidence, len(dropped)
+
+
+def _compute_review_flags(
+    scan_type: str | None,
+    confidence: float,
+    measurement_count: int,
+    image_count: int,
+    docx_generated: bool,
+    dropped_measurements: int = 0,
+) -> tuple[bool, str]:
+    """
+    Flag reports whose *generation succeeded* but whose content looks
+    questionable, so they stand out in the worklist instead of looking
+    identical to a clean report. A crashed process is obvious; a report
+    quietly generated with zero measurements or an unidentified scan type
+    is not, and that's the case worth a human's attention.
+    """
+    reasons = []
+
+    if not scan_type or scan_type == "unknown":
+        reasons.append("scan type not identified")
+    elif confidence < 0.5:
+        reasons.append(f"low classification confidence ({confidence:.0%})")
+
+    if measurement_count == 0:
+        reasons.append("no measurements extracted")
+
+    if dropped_measurements:
+        reasons.append(
+            f"{dropped_measurements} measurement(s) left blank - units could not "
+            f"be reconciled with the report template"
+        )
+
+    if image_count == 0:
+        reasons.append("no images captured")
+
+    if scan_type and scan_type != "unknown" and not docx_generated:
+        reasons.append("Word report generation failed")
+
+    return bool(reasons), "; ".join(reasons)
 
 
 def extract_patient_info(ds: pydicom.Dataset) -> dict:
@@ -347,7 +536,9 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
 
     # Process all instances in the study
     all_measurements = []
+    report_images: list[bytes] = []
     patient_info = None
+    last_ds = None
 
     series_ids = client.list_series(study_id)
     for series_id in series_ids:
@@ -359,6 +550,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
         for instance_id in instance_ids:
             try:
                 ds = client.get_instance_as_dataset(instance_id)
+                last_ds = ds
 
                 # Get patient info from first dataset
                 if patient_info is None:
@@ -370,6 +562,12 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
                     print(f"    → {len(measurements)} measurement(s) from instance {instance_id[:8]}...")
                     all_measurements.extend(measurements)
 
+                # Collect representative scan images (skips SR - no pixel data)
+                if len(report_images) < config.MAX_REPORT_IMAGES:
+                    png_bytes = dicom_to_png_bytes(ds)
+                    if png_bytes:
+                        report_images.append(png_bytes)
+
             except Exception as e:
                 print(f"    [ERROR] Instance {instance_id[:8]}: {e}")
 
@@ -377,6 +575,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     all_measurements = _deduplicate_measurements(all_measurements)
 
     print(f"\n  Total measurements: {len(all_measurements)}")
+    print(f"  Images for report: {len(report_images)}")
 
     # Generate report
     if patient_info is None:
@@ -386,17 +585,54 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
             "study_date": summary["study_date"],
         }
 
-    report_path = generate_report(patient_info, all_measurements)
-    print(f"  PDF report: {report_path}")
+    clinic_id = dashboard_db.get_default_clinic_id()
+    clinic_info = dashboard_db.get_clinic_info(clinic_id)
 
     # Also generate a .docx report (auto-detect scan type)
     # Use the last DICOM dataset for classification (SR or image)
+    docx_path, scan_type, confidence, dropped = None, None, 0.0, 0
     try:
-        last_ds = client.get_instance_as_dataset(series_ids[-1]) if series_ids else None
         if last_ds is not None:
-            generate_docx_from_dicom(last_ds, all_measurements, patient_info)
+            docx_path, scan_type, confidence, dropped = generate_docx_from_dicom(
+                last_ds, all_measurements, patient_info, images=report_images
+            )
     except Exception as e:
         print(f"  [DOCX] Could not generate .docx: {e}")
+
+    needs_review, review_reason = _compute_review_flags(
+        scan_type, confidence, len(all_measurements), len(report_images),
+        docx_path is not None, dropped_measurements=dropped,
+    )
+    if needs_review:
+        print(f"  [REVIEW] Flagged: {review_reason}")
+
+    report_path = generate_report(patient_info, all_measurements, images=report_images, clinic_info=clinic_info)
+    print(f"  PDF report: {report_path}")
+    dashboard_db.record_report(
+        clinic_id=clinic_id,
+        patient_name=patient_info.get("patient_name", ""),
+        patient_id=patient_info.get("patient_id", ""),
+        study_date=patient_info.get("study_date", ""),
+        report_type="pdf",
+        file_path=str(report_path),
+        orthanc_study_id=study_id,
+        needs_review=needs_review,
+        review_reason=review_reason,
+    )
+
+    if docx_path is not None:
+        dashboard_db.record_report(
+            clinic_id=clinic_id,
+            patient_name=patient_info.get("patient_name", ""),
+            patient_id=patient_info.get("patient_id", ""),
+            study_date=patient_info.get("study_date", ""),
+            report_type="docx",
+            scan_type=scan_type or "",
+            file_path=str(docx_path),
+            orthanc_study_id=study_id,
+            needs_review=needs_review,
+            review_reason=review_reason,
+        )
 
     print(f"{'='*60}\n")
     return report_path
@@ -430,6 +666,7 @@ def process_local_folder(folder_path: str) -> Path:
     print(f"  Found {len(dcm_files)} DICOM file(s)\n")
 
     all_measurements = []
+    report_images: list[bytes] = []
     patient_info = None
 
     for i, dcm_path in enumerate(dcm_files, 1):
@@ -451,10 +688,17 @@ def process_local_folder(folder_path: str) -> Path:
         else:
             print(f"  [{i}] {dcm_path.name} → no measurements")
 
+        # Collect representative scan images (skips SR - no pixel data)
+        if len(report_images) < config.MAX_REPORT_IMAGES:
+            png_bytes = dicom_to_png_bytes(ds)
+            if png_bytes:
+                report_images.append(png_bytes)
+
     # Deduplicate
     all_measurements = _deduplicate_measurements(all_measurements)
 
     print(f"\n  Total measurements: {len(all_measurements)}")
+    print(f"  Images for report: {len(report_images)}")
 
     if patient_info is None:
         patient_info = {
@@ -463,19 +707,54 @@ def process_local_folder(folder_path: str) -> Path:
             "study_date": datetime.now().strftime("%Y-%m-%d"),
         }
 
-    # Generate PDF report
-    report_path = generate_report(patient_info, all_measurements)
-    print(f"\n  PDF report: {report_path}")
+    clinic_id = dashboard_db.get_default_clinic_id()
+    clinic_info = dashboard_db.get_clinic_info(clinic_id)
 
     # Also generate a .docx report (auto-detect scan type from first DICOM file)
+    docx_path, scan_type, confidence, dropped = None, None, 0.0, 0
     try:
         first_ds = pydicom.dcmread(str(dcm_files[0]), force=True)
-        generate_docx_from_dicom(
+        docx_path, scan_type, confidence, dropped = generate_docx_from_dicom(
             first_ds, all_measurements, patient_info,
             filename=dcm_files[0].name,
+            images=report_images,
         )
     except Exception as e:
         print(f"  [DOCX] Could not generate .docx: {e}")
+
+    needs_review, review_reason = _compute_review_flags(
+        scan_type, confidence, len(all_measurements), len(report_images),
+        docx_path is not None, dropped_measurements=dropped,
+    )
+    if needs_review:
+        print(f"  [REVIEW] Flagged: {review_reason}")
+
+    # Generate PDF report
+    report_path = generate_report(patient_info, all_measurements, images=report_images, clinic_info=clinic_info)
+    print(f"\n  PDF report: {report_path}")
+    dashboard_db.record_report(
+        clinic_id=clinic_id,
+        patient_name=patient_info.get("patient_name", ""),
+        patient_id=patient_info.get("patient_id", ""),
+        study_date=patient_info.get("study_date", ""),
+        report_type="pdf",
+        file_path=str(report_path),
+        needs_review=needs_review,
+        review_reason=review_reason,
+    )
+
+    if docx_path is not None:
+        dashboard_db.record_report(
+            clinic_id=clinic_id,
+            patient_name=patient_info.get("patient_name", ""),
+            patient_id=patient_info.get("patient_id", ""),
+            study_date=patient_info.get("study_date", ""),
+            report_type="docx",
+            scan_type=scan_type or "",
+            file_path=str(docx_path),
+            needs_review=needs_review,
+            review_reason=review_reason,
+        )
 
     print(f"{'='*60}\n")
     return report_path

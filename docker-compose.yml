@@ -5,19 +5,36 @@ services:
     build: .
     container_name: us-reporting-pipeline
     restart: unless-stopped
-    environment:
-      - ORTHANC_URL=http://orthanc:8042
-      - ORTHANC_USERNAME=orthanc
-      - ORTHANC_PASSWORD=orthanc
     volumes:
       # Reports output - accessible from host
       - ./reports:/app/reports
       # Local DICOM files (optional - for folder mode)
       - ./dicom_input:/app/dicom_input
-      # Config override
-      - ./config.py:/app/config.py
+      # Machine-specific secrets/overrides (gitignored - see config_local.example.py).
+      # Must exist on the host before first run: copy config_local.example.py to
+      # config_local.py and fill it in, otherwise Docker creates it as a directory.
+      - ./config_local.py:/app/config_local.py
+      # Watch-mode cursor - must survive container recreation, not just restarts,
+      # otherwise `docker-compose up` after a rebuild reprocesses every study
+      - ./watch_state.json:/app/watch_state.json
+      # Dashboard DB + session secret - shared with the us-webapp service below
+      - ./data:/app/data
     # For folder mode instead of watch:
     # command: python pipeline.py folder /app/dicom_input
+
+  us-webapp:
+    build: .
+    container_name: us-reporting-dashboard
+    restart: unless-stopped
+    command: uvicorn webapp.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8080:8000"
+    volumes:
+      # Read access to generated reports, for downloads from the dashboard
+      - ./reports:/app/reports
+      - ./config_local.py:/app/config_local.py
+      # Same DB as us-pipeline - the dashboard reads what the pipeline writes
+      - ./data:/app/data
 
   # Optional: Run Orthanc alongside (remove if you already have Orthanc running)
   # orthanc:

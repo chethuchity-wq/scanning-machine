@@ -36,7 +36,11 @@ Orthanc Server (or local folder)
         ├──► normal_ranges.py        — Reference range database
         ├──► report_generator.py     — PDF output (fpdf2)
         ├──► scan_classifier.py      — 3-layer scan type auto-detection
-        └──► fill_report.py          — Word (.docx) report generation
+        ├──► fill_report.py          — Word (.docx) report generation
+        ├──► image_extract.py        — DICOM pixel data → PNG for report embedding
+        └──► webapp/db.py            — records each report to the dashboard DB
+
+webapp/main.py (dashboard, separate process) ──► reads webapp/db.py + reports/
 ```
 
 ## Setup
@@ -115,6 +119,18 @@ This runs continuously, polling Orthanc every 10 seconds (configurable). When a 
 python read_dicom.py --input "D:\DICOM_Export" --output "measurements.xlsx"
 ```
 
+## Dashboard (worklist + settings)
+
+A small web dashboard runs alongside the pipeline so clinic staff can browse and download generated reports, and edit clinic display info, without touching files or the command line.
+
+```bash
+uvicorn webapp.main:app --host 0.0.0.0 --port 8000
+```
+
+Or, via Docker, it's already wired up as the `us-webapp` service in `docker-compose.yml` (started automatically by `deploy.bat`) at **http://localhost:8080**.
+
+On first visit, it prompts you to create the first admin account (there's no default password). Every report `pipeline.py` generates is automatically recorded and shows up in the worklist. Orthanc connection settings are still edited in `config_local.py` (a service restart is needed for those to apply); clinic name/address/phone shown on PDF reports can be edited live from the Settings page.
+
 ## Output
 
 PDF reports are saved to the `reports/` directory (configurable in `config.py`). Each report includes:
@@ -188,8 +204,15 @@ scanning-machine/
 ├── report_generator.py       # PDF report generation
 ├── scan_classifier.py        # Scan type auto-detection (3-layer)
 ├── fill_report.py            # Word (.docx) report generation
+├── image_extract.py          # DICOM pixel data → PNG for report embedding
 ├── pipeline.py               # Main entry point / orchestrator
 ├── read_dicom.py             # Original Excel-based extractor
+├── webapp/                   # Dashboard (worklist + settings web UI)
+│   ├── main.py                # FastAPI app / routes
+│   ├── db.py                  # SQLite models (clinics, users, studies, reports)
+│   ├── auth.py                # Password hashing
+│   └── templates/, static/    # Jinja2 templates + CSS
+├── config_local.example.py   # Template for machine-specific secrets (copy to config_local.py)
 ├── requirements.txt          # Python dependencies
 └── README.md                 # This file
 ```

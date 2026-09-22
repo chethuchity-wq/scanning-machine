@@ -16,6 +16,8 @@ Usage:
 """
 
 import io
+import json
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -237,7 +239,8 @@ class OrthancClient:
         self,
         callback,
         poll_interval: float = None,
-        since: int = 0,
+        since: Optional[int] = None,
+        state_file: str = None,
     ):
         """
         Poll Orthanc for 'StableStudy' events and invoke callback for each.
@@ -245,13 +248,19 @@ class OrthancClient:
         Args:
             callback: Function that receives (study_id: str, study_info: dict)
             poll_interval: Seconds between polls (default: config.POLL_INTERVAL_SECONDS)
-            since: Starting change sequence number
+            since: Starting change sequence number. If None (default), resumes
+                from the position saved in `state_file` so a crash/reboot of
+                the watch process doesn't reprocess every historical study.
+            state_file: Path to a JSON file used to persist the change-feed
+                cursor across restarts (default: config.WATCH_STATE_FILE)
         """
         poll_interval = poll_interval or config.POLL_INTERVAL_SECONDS
-        last_seq = since
+        state_path = Path(state_file or config.WATCH_STATE_FILE)
+
+        last_seq = since if since is not None else self._load_watch_state(state_path)
 
         print(f"Watching Orthanc at {self.url} for new stable studies...")
-        print(f"Poll interval: {poll_interval}s | Press Ctrl+C to stop\n")
+        print(f"Poll interval: {poll_interval}s | Resuming from change #{last_seq} | Press Ctrl+C to stop\n")
 
         try:
             while True:
@@ -267,13 +276,112 @@ class OrthancClient:
                         except Exception as e:
                             print(f"  [ERROR] Failed to process study {study_id}: {e}")
 
+                    # Advance and persist the cursor after each change (not just
+                    # each poll batch) so a crash mid-batch can't cause a
+                    # already-processed study to be replayed on restart.
+                    last_seq = change["Seq"]
+                    self._save_watch_state(state_path, last_seq)
+
                 last_seq = changes["Last"]
+                self._save_watch_state(state_path, last_seq)
 
                 if changes["Done"]:
+                    self._send_heartbeat()
                     time.sleep(poll_interval)
 
         except KeyboardInterrupt:
             print("\nStopped watching.")
+
+    @staticmethod
+    def _send_heartbeat() -> None:
+        """
+        Ping an external dead-man's-switch service (e.g. healthchecks.io) once
+        per successful poll cycle, if config.HEARTBEAT_URL is set.
+
+        Deliberately external rather than something this process alerts on
+        itself: if the machine loses power, the network, or this process
+        crashes outright, it can't be the one to report its own silence.
+        The heartbeat service notices the pings *stop* and alerts from
+        outside - which is the failure mode that actually matters for an
+        unattended deployment nobody is physically next to.
+
+        Never allowed to affect the watch loop: a failure to reach the
+        heartbeat service (or none configured) is silently ignored.
+        """
+        heartbeat_url = getattr(config, "HEARTBEAT_URL", "") or ""
+        if not heartbeat_url:
+            return
+        try:
+            requests.get(heartbeat_url, timeout=5)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _load_watch_state(state_path: Path) -> int:
+        """
+        Read the persisted change-feed cursor. Returns 0 only when no state
+        file exists yet (genuine first run).
+
+        A state file that exists but cannot be parsed FAILS CLOSED rather
+        than falling back to 0. Resuming from 0 would replay Orthanc's
+        entire change history, regenerating a report for every study ever
+        received - which, on top of already-delivered reports, means
+        re-running the pipeline over work a doctor has already completed.
+        Refusing to start is recoverable; a mass reprocess is not.
+        """
+        if not state_path.exists():
+            return 0
+        try:
+            last_seq = json.loads(state_path.read_text())["last_seq"]
+        except (KeyError, ValueError, json.JSONDecodeError) as e:
+            raise RuntimeError(
+                f"""Watch state file {state_path} exists but is unreadable ({e}).
+Refusing to start: resuming from change #0 would reprocess every study on the
+Orthanc server and overwrite existing reports.
+To recover, either restore the file, or - accepting that studies received while
+it was broken will be skipped - read the current change number from Orthanc
+(GET /changes?last) and write it back manually, e.g.:
+    {{"last_seq": 12345}}"""
+            ) from e
+        if not isinstance(last_seq, int) or isinstance(last_seq, bool) or last_seq < 0:
+            raise RuntimeError(
+                f"Watch state file {state_path} holds an invalid cursor "
+                f"({last_seq!r}). Refusing to start - delete the file only if you "
+                f"intend every study on the server to be reprocessed."
+            )
+        return last_seq
+
+    @staticmethod
+    def _save_watch_state(state_path: Path, last_seq: int) -> None:
+        """
+        Persist the change-feed cursor so watch mode can resume after a restart.
+
+        Written via a temp file + atomic replace: a plain write_text truncates
+        first, so losing power mid-write leaves truncated JSON, which
+        _load_watch_state then (correctly) refuses to start from.
+
+        docker-compose bind-mounts this as a single file, where os.replace
+        cannot swap the inode - so that case falls back to an in-place write.
+        """
+        payload = json.dumps({"last_seq": last_seq})
+        tmp_path = state_path.with_name(state_path.name + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, state_path)
+        except OSError:
+            # Single-file bind mount (or any filesystem that refuses the
+            # rename): fall back to writing in place.
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            try:
+                state_path.write_text(payload)
+            except OSError as e:
+                print(f"  [WARN] Could not save watch state to {state_path}: {e}")
 
     # ------------------------------------------------------------------
     # Utility

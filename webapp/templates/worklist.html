@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Worklist{% endblock %}
+{% block content %}
+<h1>Reports</h1>
+{% set flagged = reports|selectattr("needs_review")|list %}
+{% if flagged %}
+<p class="review-banner">⚠ {{ flagged|length }} report{{ "s" if flagged|length != 1 else "" }} flagged for review</p>
+{% endif %}
+{% if not reports %}
+<p class="empty">No reports generated yet. They'll appear here automatically once the pipeline processes a scan.</p>
+{% else %}
+<table class="worklist">
+  <thead>
+    <tr>
+      <th></th>
+      <th>Patient</th>
+      <th>Patient ID</th>
+      <th>Study Date</th>
+      <th>Scan Type</th>
+      <th>Type</th>
+      <th>Status</th>
+      <th>Generated</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in reports %}
+    <tr class="{{ 'needs-review' if r.needs_review else '' }}">
+      <td>{% if r.needs_review %}<span class="review-badge" title="{{ r.review_reason }}">⚠ Review</span>{% endif %}</td>
+      <td>{{ r.patient_name }}</td>
+      <td>{{ r.patient_id }}</td>
+      <td>{{ r.study_date }}</td>
+      <td>{{ r.scan_type or "-" }}</td>
+      <td>{{ r.report_type|upper }}</td>
+      <td>
+        {% if r.document_status == "measurements" %}
+          <span class="status-badge status-measurements" title="Auto-generated measurements only — not the doctor-signed report">Measurements only</span>
+        {% elif r.document_status == "reviewed" %}
+          <span class="status-badge status-reviewed" title="Edited and saved since it was generated">✓ Reviewed</span>
+        {% else %}
+          <span class="status-badge status-draft" title="Not yet opened/saved by the doctor">Draft — awaiting doctor</span>
+        {% endif %}
+      </td>
+      <td>{{ r.generated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td><a href="/reports/{{ r.report_id }}/download">Download</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

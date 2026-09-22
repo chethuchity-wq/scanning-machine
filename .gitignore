@@ -16,11 +16,14 @@ env/
 
 # Environment
 .env
+config_local.py
 
 # Output directories (generated at runtime)
 reports/
 measurements/
 dicom_cache/
+watch_state.json
+data/
 
 # DICOM files (large binary, don't commit)
 *.dcm

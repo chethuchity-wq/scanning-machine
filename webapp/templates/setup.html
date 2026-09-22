@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Initial Setup{% endblock %}
+{% block content %}
+<div class="auth-box">
+  <h1>Create the first admin account</h1>
+  <p class="hint">
+    No users exist yet. You'll need the setup token printed in this
+    machine's console/log when the dashboard started, to prove you have
+    access to the machine and not just the network.
+  </p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/setup">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Setup token <input type="text" name="setup_token" required autofocus></label>
+    <label>Username <input type="text" name="username" required></label>
+    <label>Password <input type="password" name="password" required minlength="8"></label>
+    <button type="submit">Create account</button>
+  </form>
+</div>
+{% endblock %}

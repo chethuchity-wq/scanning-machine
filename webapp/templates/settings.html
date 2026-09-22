@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Clinic Settings</h1>
+{% if saved %}<p class="success">Saved.</p>{% endif %}
+<form method="post" action="/settings">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Clinic name <input type="text" name="name" value="{{ clinic.name or '' }}"></label>
+  <label>Address <input type="text" name="address" value="{{ clinic.address or '' }}"></label>
+  <label>Phone <input type="text" name="phone" value="{{ clinic.phone or '' }}"></label>
+  <button type="submit">Save</button>
+</form>
+
+<h2>Orthanc Connection</h2>
+<p class="hint">
+  Read-only here. To change the Orthanc URL or credentials, edit
+  <code>config_local.py</code> on this machine and restart the pipeline service.
+</p>
+<p><strong>URL:</strong> {{ orthanc_url }}</p>
+{% endblock %}
