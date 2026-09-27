@@ -38,6 +38,10 @@ class Clinic(Base):
     address: Mapped[str] = mapped_column(String(500), default="")
     phone: Mapped[str] = mapped_column(String(50), default="")
     logo_path: Mapped[str] = mapped_column(String(500), default="")
+    # Reporting doctor, printed in the PCPNDT declaration on Word reports.
+    doctor_name: Mapped[str] = mapped_column(String(200), default="")
+    doctor_qual: Mapped[str] = mapped_column(String(200), default="")
+    referring_default: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 
@@ -103,10 +107,36 @@ def _migrate_add_review_columns() -> None:
             conn.execute(text("ALTER TABLE reports ADD COLUMN review_reason VARCHAR(500) DEFAULT ''"))
 
 
+def _migrate_add_doctor_columns() -> None:
+    """
+    One-off migration for clinics tables that predate the doctor columns.
+    Backfills from config (blank unless config_local.py sets them), so an
+    upgraded site prints a blank declaration line - and gets flagged for
+    review - until someone enters the doctor on the Settings page.
+    """
+    inspector = inspect(engine)
+    if "clinics" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("clinics")}
+    with engine.begin() as conn:
+        for column, config_key in (
+            ("doctor_name", "DOCTOR_NAME"),
+            ("doctor_qual", "DOCTOR_QUAL"),
+            ("referring_default", "REFERRING_DEFAULT"),
+        ):
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE clinics ADD COLUMN {column} VARCHAR(200) DEFAULT ''"))
+                conn.execute(
+                    text(f"UPDATE clinics SET {column} = :value"),
+                    {"value": getattr(config, config_key, "") or ""},
+                )
+
+
 def init_db() -> None:
     """Create tables if needed and seed a default clinic row. Safe to call repeatedly."""
     Base.metadata.create_all(engine)
     _migrate_add_review_columns()
+    _migrate_add_doctor_columns()
     with SessionLocal() as session:
         if session.query(Clinic).count() == 0:
             session.add(
@@ -115,6 +145,9 @@ def init_db() -> None:
                     address=getattr(config, "CLINIC_ADDRESS", ""),
                     phone=getattr(config, "CLINIC_PHONE", ""),
                     logo_path=getattr(config, "CLINIC_LOGO", "") or "",
+                    doctor_name=getattr(config, "DOCTOR_NAME", "") or "",
+                    doctor_qual=getattr(config, "DOCTOR_QUAL", "") or "",
+                    referring_default=getattr(config, "REFERRING_DEFAULT", "") or "",
                 )
             )
             session.commit()
@@ -136,6 +169,9 @@ def get_clinic_info(clinic_id: int) -> dict:
             "address": clinic.address,
             "phone": clinic.phone,
             "logo_path": clinic.logo_path,
+            "doctor_name": clinic.doctor_name,
+            "doctor_qual": clinic.doctor_qual,
+            "referring_default": clinic.referring_default,
         }
 
 

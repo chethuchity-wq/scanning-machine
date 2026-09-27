@@ -26,6 +26,15 @@ you don't set here just keeps its default from config.py.
 # CLINIC_LOGO = r"C:\path\to\logo.png"
 
 # ---------------------------------------------------------------------------
+# Reporting doctor (Word reports - PCPNDT declaration + signature)
+# ---------------------------------------------------------------------------
+# Normally set on the dashboard's Settings page instead. These only seed a
+# brand-new database and cover the interactive `python fill_report.py` CLI.
+# DOCTOR_NAME = "Dr. A.B. Name"
+# DOCTOR_QUAL = "MBBS. MDRD."
+# REFERRING_DEFAULT = "Dr. C.D. Name"
+
+# ---------------------------------------------------------------------------
 # Remote monitoring (dead-man's-switch heartbeat)
 # ---------------------------------------------------------------------------
 # If this machine goes offline (power loss, network down, watch process

@@ -54,38 +54,26 @@ Then either merge it to `master`, or clone that branch by name in Part D.
 Confirm at https://github.com/chethuchity-wq/scanning-machine that the commit is
 actually there before you go further.
 
-### Blocker 2 — the doctor's name is hardcoded
+### The reporting doctor is set per clinic, on the Settings page
 
-`fill_report.py` contains:
+The doctor's name and qualification are printed inside the PCPNDT declaration on
+every obstetric report:
 
-```python
-DOCTOR_NAME = "Dr. Suhas.R.H."
-DOCTOR_QUAL = "MBBS. MDRD."
-REFERRING_DEFAULT = "Dr. Latha.K.P."
-```
-
-`DOCTOR_NAME` is printed inside the PCPNDT declaration on every obstetric report:
-
-> "I, Dr. Suhas.R.H. declare that while conducting ultrasonography / image
+> "I, <doctor name> declare that while conducting ultrasonography / image
 > scanning on ..., I have neither detected nor disclosed the sex of her foetus to
 > anybody in any manner."
 
-**If a different doctor runs the Kolar clinic, every report generated there will
-carry a false declaration in another doctor's name.** This is a statutory
-declaration under the PCPNDT Act, not cosmetic text.
+This is a statutory declaration under the PCPNDT Act, so the name is **not** in
+the code. Each clinic enters its own doctor on the dashboard's **Settings** page
+(Part G). Nothing to change in the repository before deploying.
 
-Decide now which applies:
+Until a name is entered, reports print a blank line (`____________________`) in
+the declaration for the doctor to fill in by hand, and every report is flagged
+**needs review** in the worklist with the reason "doctor name not set in
+Settings". A missing name is visible; a wrong one is never printed.
 
-- **Same doctor as Bangalore** — nothing to do.
-- **Different doctor** — these values are not in `config_local.py`, so you must
-  change them in `fill_report.py`. Do it in Bangalore, commit, and push, so the
-  Kolar machine gets the correct name from the clone. Do **not** hand-edit the
-  file on the Kolar machine: `git pull` will conflict with it on every future
-  update.
-
-If the two clinics need different doctor names from the same repository, that
-needs a code change to move these three values into `config_local.py`. Ask for it
-before deploying to the second site.
+Get the exact spelling of the Kolar doctor's name and qualification as they want
+it on reports (see the table below).
 
 ### Information to collect before you travel
 
@@ -373,6 +361,12 @@ Then create a separate **staff** account for the clinic's own use, from the
 **Users** page, and give them that one. Keep the admin login for yourself — only
 admin accounts can add or remove users.
 
+Finally, open **Settings** and fill in the clinic details and the **Reporting
+Doctor** section: doctor name, qualification, and the default "Ref by" (used when
+the scan carries no referring doctor). Do this before the first real scan — until
+the doctor name is set, the page shows a red warning and every Word report is
+flagged for review with a blank declaration line.
+
 ---
 
 ## Part H — Connect the ultrasound machine and verify
@@ -528,7 +522,7 @@ Print this and tick it off.
 ```
 Before travelling
   [ ] Branch pushed to GitHub and confirmed visible
-  [ ] DOCTOR_NAME / DOCTOR_QUAL / REFERRING_DEFAULT correct for Kolar
+  [ ] Kolar doctor's name + qualification (exact spelling) in hand
   [ ] Orthanc IP, port, username, password in hand
   [ ] Clinic name, address, phone in hand
   [ ] Full dry run passed in Bangalore

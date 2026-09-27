@@ -8,6 +8,17 @@
   <label>Clinic name <input type="text" name="name" value="{{ clinic.name or '' }}"></label>
   <label>Address <input type="text" name="address" value="{{ clinic.address or '' }}"></label>
   <label>Phone <input type="text" name="phone" value="{{ clinic.phone or '' }}"></label>
+
+  <h2>Reporting Doctor</h2>
+  <p class="hint">
+    Printed in the PCPNDT declaration and signature on every Word report.
+    If left blank, reports print a blank line to fill in by hand and are
+    flagged for review.
+  </p>
+  {% if not clinic.doctor_name %}<p class="error">No reporting doctor set - reports are being flagged for review.</p>{% endif %}
+  <label>Doctor name <input type="text" name="doctor_name" value="{{ clinic.doctor_name or '' }}" placeholder="Dr. A.B. Name"></label>
+  <label>Qualification <input type="text" name="doctor_qual" value="{{ clinic.doctor_qual or '' }}" placeholder="MBBS. MDRD."></label>
+  <label>Default "Ref by" <input type="text" name="referring_default" value="{{ clinic.referring_default or '' }}" placeholder="Used when the scan has no referring doctor"></label>
   <button type="submit">Save</button>
 </form>
 

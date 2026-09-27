@@ -330,6 +330,7 @@ def _build_docx_data(
     patient_info: dict,
     measurements: list[dict],
     images: list[bytes] = None,
+    clinic_info: dict = None,
 ) -> dict:
     """
     Build the data dict expected by fill_report.generate_report() from
@@ -339,11 +340,17 @@ def _build_docx_data(
     left out and listed under "_unit_warnings" so the caller can flag the
     report for review, rather than being printed under the wrong unit.
     """
+    clinic_info = clinic_info or {}
     data: dict = {
         "patient_name": patient_info.get("patient_name", ""),
         "age": patient_info.get("age", ""),
         "date": patient_info.get("study_date", ""),
-        "ref_by": patient_info.get("referring_physician", ""),
+        "ref_by": patient_info.get("referring_physician", "")
+        or clinic_info.get("referring_default", ""),
+        # Reporting doctor for the PCPNDT declaration - from the clinic's
+        # dashboard settings, never a hardcoded name.
+        "_doctor_name": clinic_info.get("doctor_name", ""),
+        "_doctor_qual": clinic_info.get("doctor_qual", ""),
         # sex drives declaration pronoun: "F" -> "her", "M" -> "his"
         "_sex": patient_info.get("sex", "F"),
         "_images": images or [],
@@ -374,6 +381,7 @@ def generate_docx_from_dicom(
     patient_info: dict,
     filename: str = "",
     images: list[bytes] = None,
+    clinic_info: dict = None,
 ) -> tuple[Path | None, str | None, float]:
     """
     Classify scan type from DICOM and generate the matching .docx report.
@@ -405,7 +413,7 @@ def generate_docx_from_dicom(
     print(f"  [DOCX] Scan type: {scan_type!r} (confidence {confidence:.0%}, method: {method})")
 
     # --- Build data dict ---
-    data = _build_docx_data(patient_info, measurements, images=images)
+    data = _build_docx_data(patient_info, measurements, images=images, clinic_info=clinic_info)
     dropped = data.get("_unit_warnings", [])
     for warning in dropped:
         print(f"  [DOCX] Left blank - cannot convert units: {warning}")
@@ -427,6 +435,7 @@ def _compute_review_flags(
     image_count: int,
     docx_generated: bool,
     dropped_measurements: int = 0,
+    doctor_name_missing: bool = False,
 ) -> tuple[bool, str]:
     """
     Flag reports whose *generation succeeded* but whose content looks
@@ -456,6 +465,9 @@ def _compute_review_flags(
 
     if scan_type and scan_type != "unknown" and not docx_generated:
         reasons.append("Word report generation failed")
+
+    if docx_generated and doctor_name_missing:
+        reasons.append("doctor name not set in Settings - PCPNDT declaration left blank")
 
     return bool(reasons), "; ".join(reasons)
 
@@ -594,7 +606,8 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     try:
         if last_ds is not None:
             docx_path, scan_type, confidence, dropped = generate_docx_from_dicom(
-                last_ds, all_measurements, patient_info, images=report_images
+                last_ds, all_measurements, patient_info, images=report_images,
+                clinic_info=clinic_info,
             )
     except Exception as e:
         print(f"  [DOCX] Could not generate .docx: {e}")
@@ -602,6 +615,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     needs_review, review_reason = _compute_review_flags(
         scan_type, confidence, len(all_measurements), len(report_images),
         docx_path is not None, dropped_measurements=dropped,
+        doctor_name_missing=not (clinic_info.get("doctor_name") or "").strip(),
     )
     if needs_review:
         print(f"  [REVIEW] Flagged: {review_reason}")
@@ -718,6 +732,7 @@ def process_local_folder(folder_path: str) -> Path:
             first_ds, all_measurements, patient_info,
             filename=dcm_files[0].name,
             images=report_images,
+            clinic_info=clinic_info,
         )
     except Exception as e:
         print(f"  [DOCX] Could not generate .docx: {e}")
@@ -725,6 +740,7 @@ def process_local_folder(folder_path: str) -> Path:
     needs_review, review_reason = _compute_review_flags(
         scan_type, confidence, len(all_measurements), len(report_images),
         docx_path is not None, dropped_measurements=dropped,
+        doctor_name_missing=not (clinic_info.get("doctor_name") or "").strip(),
     )
     if needs_review:
         print(f"  [REVIEW] Flagged: {review_reason}")

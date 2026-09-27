@@ -296,10 +296,21 @@ def settings_submit(
     name: str = Form(""),
     address: str = Form(""),
     phone: str = Form(""),
+    doctor_name: str = Form(""),
+    doctor_qual: str = Form(""),
+    referring_default: str = Form(""),
     csrf_token_field: str = Form(..., alias="csrf_token"),
 ):
     check_csrf(request, csrf_token_field)
-    db.update_clinic_info(user["clinic_id"], name=name, address=address, phone=phone)
+    db.update_clinic_info(
+        user["clinic_id"],
+        name=name.strip(),
+        address=address.strip(),
+        phone=phone.strip(),
+        doctor_name=doctor_name.strip(),
+        doctor_qual=doctor_qual.strip(),
+        referring_default=referring_default.strip(),
+    )
     clinic = db.get_clinic_info(user["clinic_id"])
     return templates.TemplateResponse(
         request,

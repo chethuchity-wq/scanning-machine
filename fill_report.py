@@ -41,13 +41,22 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
+import config
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DOCTOR_NAME = "Dr. Suhas.R.H."
-DOCTOR_QUAL = "MBBS. MDRD."
-REFERRING_DEFAULT = "Dr. Latha.K.P."
+# The reporting doctor's name is printed in the PCPNDT declaration - a
+# statutory statement - so it is never hardcoded here. The pipeline passes the
+# clinic's values (dashboard Settings page) in the data dict as "_doctor_name"
+# / "_doctor_qual"; these config fallbacks only cover the interactive CLI.
+# When no name is set anywhere, the report prints a blank line for the doctor
+# to fill in by hand rather than another doctor's name.
+DOCTOR_NAME = getattr(config, "DOCTOR_NAME", "")
+DOCTOR_QUAL = getattr(config, "DOCTOR_QUAL", "")
+REFERRING_DEFAULT = getattr(config, "REFERRING_DEFAULT", "")
+DOCTOR_BLANK = "____________________"
 OUTPUT_DIR = Path("reports/filled")
 
 STANDARD_NOTE = (
@@ -207,8 +216,18 @@ def _add_images_section(doc: Document, images: list[bytes] | None, images_per_ro
                 continue
 
 
-def _declaration(doc: Document, patient_name: str, sex: str = "F") -> None:
-    """sex: 'F' → her/Mrs, 'M' → his/Mr, anything else → their/the patient."""
+def _doctor(d: dict) -> tuple[str, str]:
+    """(name, qualification) for this report: data dict first, then config."""
+    name = (d.get("_doctor_name") or DOCTOR_NAME).strip()
+    qual = (d.get("_doctor_qual") or DOCTOR_QUAL).strip()
+    return name, qual
+
+
+def _declaration(doc: Document, d: dict) -> None:
+    """d["_sex"]: 'F' → her/Mrs, 'M' → his/Mr, anything else → their/the patient."""
+    patient_name = d.get("patient_name", "")
+    sex = d.get("_sex", "F")
+    doctor_name = _doctor(d)[0] or DOCTOR_BLANK
     if sex == "M":
         pronoun, title = "his", "Mr."
     elif sex == "F":
@@ -223,17 +242,18 @@ def _declaration(doc: Document, patient_name: str, sex: str = "F") -> None:
     for run in p.runs:
         run.bold = True
     doc.add_paragraph(
-        f"I. {DOCTOR_NAME} declare that while conducting ultrasonography / image "
+        f"I. {doctor_name} declare that while conducting ultrasonography / image "
         f"scanning on {name_with_title}, I have neither detected nor disclosed the "
         f"sex of {pronoun} foetus to anybody in any manner."
     )
 
 
-def _doctor_signature(doc: Document, right_align: bool = True) -> None:
+def _doctor_signature(doc: Document, d: dict, right_align: bool = True) -> None:
+    name, qual = _doctor(d)
     p = doc.add_paragraph()
     if right_align:
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p.add_run(f"{DOCTOR_NAME}\n{DOCTOR_QUAL}").bold = False
+    p.add_run(f"{name or DOCTOR_BLANK}\n{qual}".rstrip()).bold = False
 
 
 def _non_clobbering_path(path: Path) -> Path:
@@ -341,9 +361,9 @@ def generate_early_pregnancy_report(data: dict) -> Path:
     imp_para.paragraph_format.left_indent = Inches(0.2)
 
     doc.add_paragraph()
-    _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _declaration(doc, d)
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
     return _save(doc, d.get("patient_name", "patient"), "early_pregnancy", d.get("date", ""))
 
 
@@ -424,9 +444,9 @@ def generate_nt_scan_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _small_note(doc, NT_NOTE)
-    _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _declaration(doc, d)
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
     return _save(doc, d.get("patient_name", "patient"), "nt_scan", d.get("date", ""))
 
 
@@ -563,9 +583,9 @@ def generate_anomaly_scan_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _small_note(doc, ANOMALY_NOTE)
-    _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _declaration(doc, d)
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
     return _save(doc, d.get("patient_name", "patient"), "anomaly_scan", d.get("date", ""))
 
 
@@ -660,7 +680,7 @@ def generate_growth_scan_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _small_note(doc, GROWTH_NOTE)
-    _declaration(doc, d.get("patient_name", ""), sex=d.get("_sex", "F"))
+    _declaration(doc, d)
     doc.add_paragraph("Uterine artery doppler study – recorded indices:")
     _doppler_table(doc, [
         ("Right uterine artery", d.get("doppler_right_pi", "")),
@@ -669,7 +689,7 @@ def generate_growth_scan_report(data: dict) -> Path:
         ("MCA flow", d.get("doppler_mca_pi", "")),
     ])
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
     return _save(doc, d.get("patient_name", "patient"), "growth_scan", d.get("date", ""))
 
 
@@ -709,7 +729,7 @@ def generate_follicular_study_report(data: dict) -> Path:
 
     doc.add_paragraph()
     _small_note(doc, STANDARD_NOTE)
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
 
     # Patient info block
     doc.add_paragraph()
@@ -747,7 +767,7 @@ def generate_follicular_study_report(data: dict) -> Path:
         cells[4].text = str(row_data.get("free_fluid", ""))
 
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
     return _save(doc, d.get("patient_name", "patient"), "follicular_study", d.get("date", ""))
 
 
@@ -826,7 +846,7 @@ def generate_abdomen_pelvis_female_report(data: dict) -> Path:
     doc.add_paragraph()
     _small_note(doc, STANDARD_NOTE)
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
 
     return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_female", d.get("date", ""))
 
@@ -902,7 +922,7 @@ def generate_abdomen_pelvis_male_report(data: dict) -> Path:
     doc.add_paragraph()
     _small_note(doc, STANDARD_NOTE)
     _add_images_section(doc, d.get("_images"))
-    _doctor_signature(doc)
+    _doctor_signature(doc, d)
 
     return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_male", d.get("date", ""))
 

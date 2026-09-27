@@ -58,6 +58,14 @@ CLINIC_PHONE = "+91-XXXXXXXXXX"
 CLINIC_LOGO = None                  # Path to clinic logo PNG (optional)
 REPORT_FONT = "Helvetica"
 
+# Reporting doctor - printed in the PCPNDT declaration and signature block of
+# every Word report. Deliberately blank: a wrong name here is a false statutory
+# declaration. Set it per clinic on the dashboard's Settings page (these values
+# only seed a new database and cover the interactive fill_report.py CLI).
+DOCTOR_NAME = ""                    # e.g. "Dr. A.B. Name"
+DOCTOR_QUAL = ""                    # e.g. "MBBS. MDRD."
+REFERRING_DEFAULT = ""              # "Ref by" when the DICOM has no referring physician
+
 # ---------------------------------------------------------------------------
 # Local overrides
 # ---------------------------------------------------------------------------
