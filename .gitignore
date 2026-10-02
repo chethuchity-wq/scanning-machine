@@ -36,6 +36,7 @@ Desktop.ini
 
 # Logs
 *.log
+logs/
 
 # Distribution
 dist/

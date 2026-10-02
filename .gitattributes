@@ -1,0 +1,9 @@
+# Batch files break with LF line endings (labels/goto misbehave)
+*.bat text eol=crlf
+
+# Stamped with the commit hash + date by `git archive` (deploy/make_release.bat)
+VERSION export-subst
+
+# Dev-only files, left out of the release zip
+.gitignore export-ignore
+.gitattributes export-ignore

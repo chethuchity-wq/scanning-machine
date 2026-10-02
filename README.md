@@ -231,12 +231,13 @@ scanning-machine/
 - Reports are auto-generated aids. **Radiologist review is mandatory** before clinical use.
 - The Orthanc `watch` mode uses the Changes API. Ensure your Orthanc instance has `StableStudy` events enabled (default behavior).
 
+## Installing on a clinic PC
 
-Quickest path for you
-Since your scanning machines are Windows and likely don't have Docker:
+1. On your machine, commit, then run `deploy\make_release.bat`. It builds
+   `dist\scanning-machine-<commit>.zip` from the last commit (no secrets, no
+   `.venv`).
+2. Copy the zip to the clinic PC, extract it, and double-click `setup.bat`.
 
-Install Python on the target machine
-Copy the folder over (USB, network share, whatever)
-Double-click install.bat
-Update the Orthanc IP in config.py
-Run run.bat watch — it starts processing scans automatically
+`setup.bat` installs Python if needed, installs to `C:\scanning-machine`, asks for
+the Orthanc and clinic details, and sets the pipeline and dashboard to start at
+boot. Run it again with a newer zip to update. Full runbook: [DEPLOY.md](DEPLOY.md).
