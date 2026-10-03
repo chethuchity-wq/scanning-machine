@@ -1,0 +1,8 @@
+{# Status badge for scan `s` #}
+{% if s.document_status == "measurements" %}
+  <span class="status-badge status-measurements" title="Scan type not identified - no Word report, only the measurements summary">Measurements only</span>
+{% elif s.document_status == "reviewed" %}
+  <span class="status-badge status-reviewed" title="Edited and saved since it was generated">&#10003; Reviewed</span>
+{% else %}
+  <span class="status-badge status-draft" title="Not yet edited and saved by the doctor">Awaiting doctor</span>
+{% endif %}

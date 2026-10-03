@@ -10,6 +10,8 @@ Run: uvicorn webapp.main:app --host 0.0.0.0 --port 8000
 
 from __future__ import annotations
 
+import json
+import re
 import secrets
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -23,7 +25,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 import docx_pdf
-from webapp import db
+from webapp import db, docx_editor
 from webapp.auth import hash_password, verify_password
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -293,6 +295,12 @@ SCAN_TYPE_NAMES = {
     "abdomen_pelvis_female": "Abdomen & pelvis (F)",
     "abdomen_pelvis_male": "Abdomen & pelvis (M)",
 }
+STATUS_NAMES = {
+    "draft": "Awaiting doctor",
+    "reviewed": "Reviewed",
+    "measurements": "Measurements only",
+    "flagged": "Needs checking",
+}
 
 
 def _local_time(utc: datetime) -> str:
@@ -300,40 +308,246 @@ def _local_time(utc: datetime) -> str:
     return utc.replace(tzinfo=timezone.utc).astimezone().strftime("%H:%M")
 
 
-def _parse_day(value: Optional[str]) -> date:
+def _parse_day(value: Optional[str]) -> Optional[date]:
     try:
-        return date.fromisoformat(value) if value else date.today()
+        return date.fromisoformat(value) if value else None
     except ValueError:
-        return date.today()
+        return None
+
+
+def _decorate(entries: list[dict]) -> list[dict]:
+    for e in entries:
+        e["scan_name"] = SCAN_TYPE_NAMES.get(e["scan_type"], "Not identified")
+        e["time"] = _local_time(e["generated_at"])
+        d = _parse_day(e["study_date"])
+        e["date_label"] = d.strftime("%d/%m/%Y") if d else e["study_date"]
+    return entries
+
+
+def _calendar(clinic_id: int, open_day: Optional[date]) -> list[dict]:
+    """
+    Year > month > day tree for the sidebar. Days are listed only for the
+    open year - an older year shows its months, each linking to that month's
+    latest day - so the sidebar stays small however many years accumulate.
+    """
+    years: dict = {}
+    for iso, count in db.study_day_counts(clinic_id):
+        d = _parse_day(iso)
+        if d is None:
+            continue
+        year = years.setdefault(d.year, {"year": d.year, "total": 0, "months": {}})
+        month = year["months"].setdefault(d.month, {
+            "key": f"{d.year}-{d.month:02d}", "label": d.strftime("%B"),
+            "total": 0, "days": [], "latest": iso,
+        })
+        year["total"] += count
+        month["total"] += count
+        month["days"].append({"iso": iso, "label": d.strftime("%d %a"), "count": count})
+    open_year = open_day.year if open_day else (max(years) if years else None)
+    open_month = f"{open_day.year}-{open_day.month:02d}" if open_day else None
+    tree = []
+    for y in sorted(years, reverse=True):
+        year = years[y]
+        months = [year["months"][m] for m in sorted(year["months"], reverse=True)]
+        for m in months:
+            m["open"] = m["key"] == open_month
+        tree.append({**year, "months": months, "open": y == open_year})
+    return tree
+
+
+def _page(request: Request, user: dict, template: str, open_day: Optional[date], **context):
+    """Render a page with the sidebar: calendar, and the open day's patients."""
+    day_patients = _decorate(db.list_day_studies(user["clinic_id"], open_day.isoformat())) if open_day else []
+    return templates.TemplateResponse(request, template, {
+        "user": user,
+        "calendar": _calendar(user["clinic_id"], open_day),
+        "open_day": open_day,
+        "day_patients": day_patients,
+        "today": date.today(),
+        "scan_types": SCAN_TYPE_NAMES,
+        "status_names": STATUS_NAMES,
+        **context,
+    })
 
 
 @app.get("/", response_class=HTMLResponse)
 def worklist(request: Request, day: Optional[str] = None, user: dict = Depends(require_login)):
-    """One study date per page, today by default; scans numbered 1, 2, 3..."""
-    shown = _parse_day(day)
+    """One study date per page, today by default."""
+    shown = _parse_day(day) or date.today()
     key = shown.isoformat()
-    dates = db.study_dates(user["clinic_id"])
-    studies = db.list_day_studies(user["clinic_id"], key)
-    for s in studies:
-        s["scan_name"] = SCAN_TYPE_NAMES.get(s["scan_type"], "Not identified")
-        s["time"] = _local_time(s["generated_at"])
-    # Previous / next day that has scans, skipping empty days (e.g. Sundays)
-    earlier = [d for d in dates if d < key]
-    later = [d for d in dates if d > key]
-    return templates.TemplateResponse(request, "worklist.html", {
-        "user": user,
-        "day": shown,
-        "is_today": shown == date.today(),
-        "studies": studies,
-        "prev_day": earlier[0] if earlier else None,
-        "next_day": later[-1] if later else None,
-        "latest_day": dates[0] if dates else None,
-        "counts": {
+    studies = _decorate(db.list_day_studies(user["clinic_id"], key))
+    days = [d for d, _ in db.study_day_counts(user["clinic_id"])]
+    earlier = [d for d in days if d < key]
+    later = [d for d in days if d > key]
+    return _page(
+        request, user, "worklist.html", shown,
+        day=shown,
+        is_today=shown == date.today(),
+        studies=studies,
+        prev_day=earlier[0] if earlier else None,
+        next_day=later[-1] if later else None,
+        latest_day=days[0] if days else None,
+        counts={
             "draft": sum(s["document_status"] == "draft" for s in studies),
             "reviewed": sum(s["document_status"] == "reviewed" for s in studies),
             "flagged": sum(bool(s["needs_review"]) for s in studies),
         },
-    })
+    )
+
+
+def _study_or_404(user: dict, study_id: int) -> dict:
+    study = db.get_study(user["clinic_id"], study_id)
+    if study is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return _decorate([study])[0]
+
+
+@app.get("/study/{study_id}", response_class=HTMLResponse)
+def study_page(
+    request: Request,
+    study_id: int,
+    remade: str = "",
+    error: str = "",
+    user: dict = Depends(require_login),
+):
+    """A scan's details on top, its Word report below, editable in place."""
+    study = _study_or_404(user, study_id)
+    day = _parse_day(study["study_date"])
+    document = None
+    if study["report_type"] == "docx" and Path(study["file_path"]).exists():
+        document = docx_editor.render(study["file_path"])
+    siblings = db.list_day_studies(user["clinic_id"], study["study_date"])
+    ids = [s["study_id"] for s in siblings]
+    i = ids.index(study_id) if study_id in ids else -1
+    return _page(
+        request, user, "study.html", day,
+        study=study,
+        document=document,
+        scan=_scan_data(study),
+        prev_study=ids[i - 1] if i > 0 else None,
+        next_study=ids[i + 1] if 0 <= i < len(ids) - 1 else None,
+        day_total=len(ids),
+        csrf_token=csrf_token(request),
+        remade=bool(remade),
+        error={
+            "no-orthanc": "This scan was not loaded from Orthanc, so its report can't be remade here.",
+            "remake": "Could not remake the report - Orthanc may be unreachable. Details are in the dashboard log.",
+        }.get(error, ""),
+    )
+
+
+def _scan_data_dir(study: dict) -> Optional[Path]:
+    """Images and values saved by the pipeline (pipeline.scan_data_dir)."""
+    orthanc_id = re.sub(r"[^A-Za-z0-9-]", "", study.get("orthanc_study_id") or "")
+    return Path(config.OUTPUT_DIR) / "scan_data" / orthanc_id if orthanc_id else None
+
+
+def _scan_data(study: dict) -> Optional[dict]:
+    folder = _scan_data_dir(study)
+    try:
+        return json.loads((folder / "scan.json").read_text()) if folder else None
+    except (OSError, ValueError):
+        return None
+
+
+@app.get("/study/{study_id}/scan/{name}")
+def study_scan_image(study_id: int, name: str, user: dict = Depends(require_login)):
+    if not re.fullmatch(r"image_\d{2,3}\.jpg", name):
+        raise HTTPException(status_code=404, detail="Not found")
+    folder = _scan_data_dir(_study_or_404(user, study_id))
+    if folder is None or not (folder / name).exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(folder / name, media_type="image/jpeg")
+
+
+@app.get("/study/{study_id}/document")
+def study_document(study_id: int, user: dict = Depends(require_login)):
+    """The editor's content, re-read after a save (paragraph numbering may shift)."""
+    study = _study_or_404(user, study_id)
+    if study["report_type"] != "docx":
+        raise HTTPException(status_code=404, detail="This scan has no Word report")
+    return {**docx_editor.render(study["file_path"]), "status": study["document_status"]}
+
+
+@app.post("/study/{study_id}/document")
+async def save_study_document(request: Request, study_id: int, user: dict = Depends(require_login)):
+    check_csrf(request, request.headers.get("X-CSRF-Token", ""))
+    study = _study_or_404(user, study_id)
+    if study["report_type"] != "docx":
+        raise HTTPException(status_code=404, detail="This scan has no Word report")
+    payload = await request.json()
+    try:
+        version = docx_editor.save(study["file_path"], str(payload.get("version", "")), payload.get("blocks") or [])
+    except docx_editor.VersionConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="The report was changed elsewhere (e.g. in Word) since you opened it. "
+                   "Reload the page to see it; your unsaved changes here will be lost.",
+        )
+    except PermissionError:
+        raise HTTPException(status_code=423, detail="The report is open in Word. Close it in Word, then save again.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"version": version, "saved_at": datetime.now().strftime("%H:%M")}
+
+
+@app.post("/study/{study_id}/report-type")
+def change_report_type(
+    request: Request,
+    study_id: int,
+    user: dict = Depends(require_login),
+    scan_type: str = Form(...),
+    csrf_token_field: str = Form(..., alias="csrf_token"),
+):
+    """
+    Remake the scan's report as another form - for when the scanner's exam
+    type was wrong (e.g. left on OB for an abdomen scan). Re-reads the scan
+    from Orthanc. The previous report's file stays in the folder; the page
+    then shows the new one.
+    """
+    check_csrf(request, csrf_token_field)
+    study = _study_or_404(user, study_id)
+    if scan_type not in SCAN_TYPE_NAMES:
+        raise HTTPException(status_code=400, detail="Unknown report type")
+    if not study["orthanc_study_id"]:
+        return RedirectResponse(f"/study/{study_id}?error=no-orthanc", status_code=303)
+    # Imported here: pulls in the DICOM/OCR stack, which only this action needs
+    import pipeline
+    from orthanc_client import OrthancClient
+    try:
+        pipeline.process_orthanc_study(OrthancClient(), study["orthanc_study_id"], scan_type=scan_type)
+    except Exception as e:
+        print(f"[dashboard] Remaking report as {scan_type} failed: {e}")
+        return RedirectResponse(f"/study/{study_id}?error=remake", status_code=303)
+    return RedirectResponse(f"/study/{study_id}?remade=1", status_code=303)
+
+
+@app.get("/search", response_class=HTMLResponse)
+def search(
+    request: Request,
+    q: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    scan: str = "",
+    status: str = "",
+    user: dict = Depends(require_login),
+):
+    searched = any((q.strip(), date_from, date_to, scan, status))
+    results, truncated = [], False
+    if searched:
+        results, truncated = db.search_studies(
+            user["clinic_id"],
+            query_text=q.strip(),
+            date_from=date_from if _parse_day(date_from) else "",
+            date_to=date_to if _parse_day(date_to) else "",
+            scan_type=scan if scan in SCAN_TYPE_NAMES else "",
+            status=status if status in STATUS_NAMES else "",
+        )
+    return _page(
+        request, user, "search.html", None,
+        q=q, date_from=date_from, date_to=date_to, scan=scan, status=status,
+        searched=searched, results=_decorate(results), truncated=truncated,
+    )
 
 
 def _report_file(user: dict, report_id: int) -> Path:
@@ -353,15 +567,15 @@ def download_report(report_id: int, user: dict = Depends(require_login)):
 def report_pdf(report_id: int, user: dict = Depends(require_login)):
     """
     PDF of a report, opened in the browser for printing. A Word report is
-    converted by Word on request - and again whenever the doctor has edited
-    it since - so the PDF always matches the Word file.
+    converted by Word on request - and again whenever it has been edited
+    since - so the PDF always matches the Word file.
     """
     path = _report_file(user, report_id)
     if path.suffix.lower() == ".docx":
         if docx_pdf.is_stale(path) and docx_pdf.convert(path) is None:
             raise HTTPException(
                 status_code=503,
-                detail="Could not create the PDF. Open the Word report and "
+                detail="Could not create the PDF. Download the Word report and "
                        "print or save it as PDF from Word.",
             )
         path = docx_pdf.pdf_path_for(path)

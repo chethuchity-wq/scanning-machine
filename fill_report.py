@@ -66,6 +66,12 @@ OUTPUT_DIR = Path("reports/filled")
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 _DATE_FIELDS = ("date", "lmp", "edd_scan", "edd_lmp")
+# A value the scan didn't provide prints as a fill-in line ("Normal in size
+# (____ cm)") so the doctor can't miss it - not as "( cm)". Patient-box fields
+# stay empty: an empty box is already obvious.
+MISSING_VALUE = "____"
+_LEAVE_EMPTY = {"patient_name", "patient_id", "age", "date", "ref_by", "lmp",
+                "clinical_details", "clinical_data", "doctor_qual"}
 
 STANDARD_NOTE = (
     "Note: This is only a radiological impression and not a diagnosis and has its "
@@ -1031,7 +1037,11 @@ def _fill_template(template: Path, d: dict) -> Document:
             continue
         # Right to left, so earlier match offsets stay valid
         for match in reversed(list(_PLACEHOLDER_RE.finditer(text))):
-            _replace_span(paragraph, match.start(), match.end(), values.get(match.group(1), ""))
+            field = match.group(1)
+            value = values.get(field, "")
+            if not value.strip() and field not in _LEAVE_EMPTY:
+                value = MISSING_VALUE
+            _replace_span(paragraph, match.start(), match.end(), value)
     return doc
 
 

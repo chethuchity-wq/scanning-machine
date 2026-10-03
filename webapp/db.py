@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, String, create_engine, inspect, text
+from sqlalchemy import Boolean, ForeignKey, String, create_engine, func, inspect, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 import config
@@ -232,26 +232,53 @@ def record_report(
         session.commit()
 
 
-def study_dates(clinic_id: int) -> list[str]:
-    """Distinct study dates (YYYY-MM-DD) that have reports, newest first."""
+def study_day_counts(clinic_id: int) -> list[tuple[str, int]]:
+    """(study date YYYY-MM-DD, number of scans) for every day with scans, newest first."""
     with SessionLocal() as session:
         rows = (
-            session.query(Study.study_date)
+            session.query(Study.study_date, func.count(func.distinct(Study.id)))
             .join(Report, Report.study_id == Study.id)
             .filter(Study.clinic_id == clinic_id)
-            .distinct()
+            .group_by(Study.study_date)
             .all()
         )
-    return sorted((d for (d,) in rows if d), reverse=True)
+    return sorted(((d, n) for d, n in rows if d), reverse=True)
+
+
+def _primary_report(study: Study) -> Optional[Report]:
+    """
+    The scan's record: its latest Word report, else its latest PDF (a
+    measurements-only summary when the scan type wasn't identified). Older
+    studies also have a PDF row from when every Word report got one - ignored.
+    """
+    reports = sorted(study.reports, key=lambda r: r.generated_at)
+    word = [r for r in reports if r.report_type == "docx"]
+    return (word or reports)[-1] if reports else None
+
+
+def _study_entry(study: Study, report: Report, number: Optional[int] = None) -> dict:
+    return {
+        "number": number,
+        "study_id": study.id,
+        "report_id": report.id,
+        "patient_name": " ".join(study.patient_name.replace("^", " ").split()),
+        "patient_id": study.patient_id,
+        "study_date": study.study_date,
+        "orthanc_study_id": study.orthanc_study_id,
+        "report_type": report.report_type,
+        "scan_type": report.scan_type,
+        "file_path": report.file_path,
+        "generated_at": report.generated_at,
+        "needs_review": report.needs_review,
+        "review_reason": report.review_reason,
+        "document_status": _document_status(report.report_type, report.file_path, report.generated_at),
+    }
 
 
 def list_day_studies(clinic_id: int, study_date: str) -> list[dict]:
     """
     One entry per scan on `study_date`, numbered 1, 2, 3... in the order the
-    scans arrived. The Word report is the scan's record; a study without one
-    (scan type not identified) shows its measurements-only PDF instead.
-    Older studies may also have a PDF row from when every Word report got
-    one - it is ignored. A study processed twice shows its latest report.
+    scans arrived.
     """
     with SessionLocal() as session:
         studies = (
@@ -262,24 +289,65 @@ def list_day_studies(clinic_id: int, study_date: str) -> list[dict]:
         )
         day = []
         for study in studies:
-            reports = sorted(study.reports, key=lambda r: r.generated_at)
-            if not reports:
-                continue
-            word = [r for r in reports if r.report_type == "docx"]
-            report = (word or reports)[-1]
-            day.append({
-                "number": len(day) + 1,
-                "report_id": report.id,
-                "patient_name": " ".join(study.patient_name.replace("^", " ").split()),
-                "patient_id": study.patient_id,
-                "report_type": report.report_type,
-                "scan_type": report.scan_type,
-                "generated_at": report.generated_at,
-                "needs_review": report.needs_review,
-                "review_reason": report.review_reason,
-                "document_status": _document_status(report.report_type, report.file_path, report.generated_at),
-            })
+            report = _primary_report(study)
+            if report is not None:
+                day.append(_study_entry(study, report, number=len(day) + 1))
         return day
+
+
+def get_study(clinic_id: int, study_id: int) -> Optional[dict]:
+    """One scan with its record, numbered as on its day's list."""
+    with SessionLocal() as session:
+        study = session.get(Study, study_id)
+        if study is None or study.clinic_id != clinic_id:
+            return None
+        report = _primary_report(study)
+        if report is None:
+            return None
+    for entry in list_day_studies(clinic_id, study.study_date):
+        if entry["study_id"] == study_id:
+            return entry
+    return None
+
+
+def search_studies(
+    clinic_id: int,
+    query_text: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    scan_type: str = "",
+    status: str = "",
+    limit: int = 300,
+) -> tuple[list[dict], bool]:
+    """
+    Scans matching every filter given, newest first. `query_text` matches patient
+    name or ID anywhere. `status` is draft / reviewed / measurements /
+    flagged. Returns (results, truncated).
+    """
+    with SessionLocal() as session:
+        query = session.query(Study).filter(Study.clinic_id == clinic_id)
+        for word in query_text.split():
+            like = f"%{word}%"
+            query = query.filter(or_(Study.patient_name.ilike(like), Study.patient_id.ilike(like)))
+        if date_from:
+            query = query.filter(Study.study_date >= date_from)
+        if date_to:
+            query = query.filter(Study.study_date <= date_to)
+        studies = query.order_by(Study.study_date.desc(), Study.created_at.desc()).all()
+        results = []
+        for study in studies:
+            report = _primary_report(study)
+            if report is None or (scan_type and report.scan_type != scan_type):
+                continue
+            entry = _study_entry(study, report)
+            if status == "flagged" and not entry["needs_review"]:
+                continue
+            if status in ("draft", "reviewed", "measurements") and entry["document_status"] != status:
+                continue
+            results.append(entry)
+            if len(results) > limit:
+                return results[:limit], True
+        return results, False
 
 
 def _document_status(report_type: str, file_path: str, generated_at: datetime) -> str:

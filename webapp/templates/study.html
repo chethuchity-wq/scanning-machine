@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{{ study.patient_name }} - {{ study.date_label }}{% endblock %}
+{% block body_class %}app{% endblock %}
+{% block content %}
+<div class="app-grid">
+  {% include "_sidebar.html" %}
+  <section class="app-main study">
+    <header class="study-head">
+      <div class="crumbs">
+        <a href="/?day={{ study.study_date }}">{{ study.date_label }}</a>
+        <span>&rsaquo;</span> Scan {{ study.number }} of {{ day_total }}
+        <span class="spacer"></span>
+        {% if prev_study %}<a class="day-nav" href="/study/{{ prev_study }}" title="Previous patient (Alt+&uarr;)">&#9650; Previous</a>{% else %}<span class="day-nav disabled">&#9650; Previous</span>{% endif %}
+        {% if next_study %}<a class="day-nav" href="/study/{{ next_study }}" title="Next patient (Alt+&darr;)">Next &#9660;</a>{% else %}<span class="day-nav disabled">Next &#9660;</span>{% endif %}
+      </div>
+      <div class="head-row">
+        <div>
+          <h1>{{ study.patient_name }}</h1>
+          <dl class="meta">
+            <div><dt>Patient ID</dt><dd>{{ study.patient_id or "-" }}</dd></div>
+            <div><dt>Study date</dt><dd>{{ study.date_label }}</dd></div>
+            <div><dt>Scan</dt><dd>{{ study.scan_name }}</dd></div>
+            <div><dt>Report made</dt><dd>{{ study.time }}</dd></div>
+            <div><dt>Status</dt><dd id="status-badge">{% set s = study %}{% include "_status.html" %}</dd></div>
+          </dl>
+          {% if study.needs_review %}<p class="reason">&#9888; Check: {{ study.review_reason }}</p>{% endif %}
+        </div>
+        {% if study.orthanc_study_id %}
+        <form class="type-form" method="post" action="/study/{{ study.study_id }}/report-type"
+              data-current="{{ study.scan_type }}" data-reviewed="{{ '1' if study.document_status == 'reviewed' }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Report type
+            <select name="scan_type">
+              {% if not study.scan_type %}<option value="" selected disabled>Not identified - choose</option>{% endif %}
+              {% for key, name in scan_types.items() %}<option value="{{ key }}" {{ 'selected' if key == study.scan_type }}>{{ name }}</option>{% endfor %}
+            </select>
+          </label>
+          <button type="submit" class="btn" disabled title="Pick a different report type first">Remake report</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if remade %}<p class="notice">&#10003; Report remade as {{ study.scan_name }}.</p>{% endif %}
+      {% if error %}<p class="notice notice-error">{{ error }}</p>{% endif %}
+      {% if document %}
+      <div class="toolbar" role="toolbar" aria-label="Report editing">
+        <button type="button" class="tool" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button type="button" class="tool" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button type="button" class="tool" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <button type="button" class="tool" data-cmd="undo" title="Undo (Ctrl+Z)">&#8630;</button>
+        <span class="sep"></span>
+        <button type="button" id="save-btn" class="save" disabled title="Save into the Word report (Ctrl+S)">Save</button>
+        <span id="save-state" class="save-state">All changes saved</span>
+        <span id="page-count" class="page-count" title="Where Word will start each new page is marked on the sheet"></span>
+        <span class="spacer"></span>
+        <a class="btn btn-light" id="pdf-btn" href="/reports/{{ study.report_id }}/pdf" target="_blank" title="Print or save as PDF - made from the saved Word report">PDF / Print</a>
+        <a class="btn btn-light" href="/reports/{{ study.report_id }}/download" title="Download the Word file">Word file</a>
+      </div>
+      {% else %}
+      <div class="toolbar">
+        <span class="hint">Scan type not identified - no Word report was made. This is the measurements summary.</span>
+        <span class="spacer"></span>
+        <a class="btn btn-light" href="/reports/{{ study.report_id }}/pdf" target="_blank">Open PDF</a>
+      </div>
+      {% endif %}
+    </header>
+
+    <div class="study-body">
+      {% if document %}
+      <div class="editor-wrap">
+        <div class="page" style="width:{{ '%.2f'|format(document.page.width) }}in; padding:0 {{ '%.2f'|format(document.page.right) }}in 0 {{ '%.2f'|format(document.page.left) }}in">
+          <div class="letterhead-space" style="height:{{ '%.2f'|format(document.page.top) }}in"><span>Letterhead</span></div>
+          <div id="editor" class="doc" contenteditable="true" spellcheck="true"
+               data-version="{{ document.version }}"
+               data-url="/study/{{ study.study_id }}/document"
+               data-csrf="{{ csrf_token }}"
+               data-page-height="{{ document.page.height }}" data-margin-top="{{ document.page.top }}" data-margin-bottom="{{ document.page.bottom }}">{{ document.html|safe }}</div>
+          <div class="letterhead-space letterhead-foot" style="height:{{ '%.2f'|format(document.page.bottom) }}in"><span>Letterhead footer</span></div>
+        </div>
+      </div>
+      {% else %}
+      <iframe class="pdf-frame" src="/reports/{{ study.report_id }}/pdf" title="Measurements summary"></iframe>
+      {% endif %}
+
+      {% if scan and (scan.images or scan.report_values) %}
+      <aside class="scan-panel" id="scan-panel" aria-label="Measurements from scan">
+        <div class="scan-panel-head">
+          <h2>Measurements from scan</h2>
+          {% if document %}<p class="hint">Click in the report where a value goes, then click the value to put it there.</p>{% endif %}
+        </div>
+        {% if scan.report_values %}
+        <section class="scan-group">
+          <h3>Scanner report</h3>
+          <ul class="values">
+            {% for v in scan.report_values %}
+            <li><button type="button" class="value-chip" data-value="{{ v.value }}" title="{{ v.name }}"><span class="vn">{{ v.name }}</span><span class="vv">{{ v.value }} {{ v.unit }}</span></button></li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endif %}
+        {% for img in scan.images %}
+        <figure class="scan-image">
+          <a href="/study/{{ study.study_id }}/scan/{{ img.file }}" target="_blank" title="Open full size">
+            <img src="/study/{{ study.study_id }}/scan/{{ img.file }}" alt="Scan image {{ loop.index }}" loading="lazy">
+          </a>
+          <figcaption>
+            <span class="img-no">Image {{ loop.index }}</span>
+            {% if img['values'] %}
+            <span class="chips">
+              {% for v in img['values'] %}<button type="button" class="value-chip" data-value="{{ v.value }}" title="{{ v.name }} - click to put in the report">{{ v.value }} {{ v.unit }}</button>{% endfor %}
+            </span>
+            {% else %}<span class="hint">no values</span>{% endif %}
+          </figcaption>
+        </figure>
+        {% endfor %}
+      </aside>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>{% endblock %}

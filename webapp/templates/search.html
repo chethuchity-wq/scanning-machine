@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Search{% endblock %}
+{% block body_class %}app{% endblock %}
+{% block content %}
+<div class="app-grid">
+  {% include "_sidebar.html" %}
+  <section class="app-main">
+    <h1>Search</h1>
+    <form class="search-form" method="get" action="/search">
+      <label class="wide">Name or patient ID
+        <input type="search" name="q" value="{{ q }}" placeholder="e.g. Pavithra, or 5128142" autofocus>
+      </label>
+      <label>From <input type="date" name="date_from" value="{{ date_from }}"></label>
+      <label>To <input type="date" name="date_to" value="{{ date_to }}"></label>
+      <label>Scan
+        <select name="scan">
+          <option value="">Any</option>
+          {% for key, name in scan_types.items() %}<option value="{{ key }}" {{ 'selected' if scan == key }}>{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Status
+        <select name="status">
+          <option value="">Any</option>
+          {% for key, name in status_names.items() %}<option value="{{ key }}" {{ 'selected' if status == key }}>{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button type="submit">Search</button>
+        <a href="/search" class="link">Clear</a>
+      </div>
+    </form>
+
+    {% if searched %}
+      {% if results %}
+      <p class="day-summary"><strong>{{ results|length }}</strong> scan{{ "s" if results|length != 1 }} found{% if truncated %} - showing the newest {{ results|length }}; narrow the search to see older ones{% endif %}</p>
+      <table class="worklist">
+        <thead>
+          <tr><th>Date</th><th>Patient</th><th>Patient ID</th><th>Scan</th><th>Status</th><th>Report</th></tr>
+        </thead>
+        <tbody>
+          {% for s in results %}
+          <tr class="clickable {{ 'needs-review' if s.needs_review }}" data-href="/study/{{ s.study_id }}">
+            <td><a href="/?day={{ s.study_date }}">{{ s.date_label }}</a></td>
+            <td>
+              <a class="patient" href="/study/{{ s.study_id }}">{{ s.patient_name }}</a>
+              {% if s.needs_review %}<div class="reason">&#9888; {{ s.review_reason }}</div>{% endif %}
+            </td>
+            <td>{{ s.patient_id }}</td>
+            <td>{{ s.scan_name }}</td>
+            <td>{% include "_status.html" %}</td>
+            <td class="actions"><a class="btn" href="/study/{{ s.study_id }}">Open</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty">No scans match.</p>
+      {% endif %}
+    {% else %}
+    <p class="hint">Type part of a name or patient ID, or pick dates, scan type or status. Every filter you fill in must match.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>{% endblock %}

@@ -7,11 +7,12 @@
   <link rel="stylesheet" href="/static/style.css">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   {% if user %}
   <nav class="topnav">
-    <span class="brand">Ultrasound Reporting</span>
+    <a class="brand" href="/">Ultrasound Reporting</a>
     <a href="/">Worklist</a>
+    <a href="/search">Search</a>
     <a href="/settings">Settings</a>
     {% if user.role == "admin" %}<a href="/users">Users</a>{% endif %}
     <span class="spacer"></span>
@@ -24,5 +25,6 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

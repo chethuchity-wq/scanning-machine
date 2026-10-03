@@ -26,9 +26,12 @@ from docx.shared import Inches, Pt
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-# Page: A4. Top margin clears the pre-printed letterhead.
+# Page: A4, printed on the clinic's pre-printed letterhead: the top margin clears
+# its header; the bottom margin clears its ~1.4" (3.5 cm) footer band, with the
+# page-number line just above that band.
 PAGE_W, PAGE_H = Inches(8.27), Inches(11.69)
-MARGIN_TOP, MARGIN_BOTTOM = Inches(1.5), Inches(1.0)
+MARGIN_TOP, MARGIN_BOTTOM = Inches(1.5), Inches(1.85)
+FOOTER_DISTANCE = Inches(1.5)
 MARGIN_SIDE = Inches(0.75)
 CONTENT_W = 8.27 - 2 * 0.75  # inches
 
@@ -46,7 +49,7 @@ def new_doc() -> Document:
     section.page_width, section.page_height = PAGE_W, PAGE_H
     section.top_margin, section.bottom_margin = MARGIN_TOP, MARGIN_BOTTOM
     section.left_margin = section.right_margin = MARGIN_SIDE
-    section.footer_distance = Inches(0.45)
+    section.footer_distance = FOOTER_DISTANCE
 
     normal = doc.styles["Normal"]
     normal.font.name = FONT
@@ -148,6 +151,18 @@ def _keep_rows_together(table) -> None:
         tr_pr.append(cant_split)
 
 
+def keep_table_together(table) -> None:
+    """
+    Keep a short table on one page: every row but the last keeps with the
+    next, so Word moves the whole table (and its heading, which keeps with
+    the table) to the next page instead of splitting it.
+    """
+    for row in table.rows[:-1]:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.keep_with_next = True
+
+
 def grid_table(doc: Document, rows: list[list[str]], widths: list[float],
                header: bool = False, label_cols: tuple[int, ...] = (0,),
                center_cols: tuple[int, ...] = ()) -> None:
@@ -165,6 +180,7 @@ def grid_table(doc: Document, rows: list[list[str]], widths: list[float],
             _cell_text(cell, value, bold=bold, align=align)
     _set_widths(table, widths)
     _keep_rows_together(table)
+    keep_table_together(table)
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
@@ -196,6 +212,7 @@ def patient_box(doc: Document, sex: str, clinical: str, lmp: bool) -> None:
         table.rows[2].cells[1].merge(table.rows[2].cells[3])
     _tidy_merged(table)
     _keep_rows_together(table)
+    keep_table_together(table)
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
 

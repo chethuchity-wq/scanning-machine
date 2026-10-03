@@ -33,6 +33,7 @@ Usage:
 
 import argparse
 import io
+import json
 import re
 import sys
 from datetime import datetime
@@ -108,6 +109,9 @@ def process_dataset(ds: pydicom.Dataset, filename: str = "") -> list[dict]:
     return measurements
 
 
+_GENERIC_NAME_RE = re.compile(r"^(dist|d|vol|volume|area|circ|angle)\s*\d*$")
+
+
 def _deduplicate_measurements(measurements: list[dict]) -> list[dict]:
     """Remove duplicate measurements, preferring SR > DICOM Tag > OCR."""
     priority = {"SR": 3, "DICOM Tag": 2, "OCR": 1}
@@ -120,6 +124,10 @@ def _deduplicate_measurements(measurements: list[dict]) -> list[dict]:
             continue
 
         key = (name.lower().strip(), m.get("unit", "").lower())
+        # Unlabelled calliper readings ("Dist", "Dist1", "Volume") are different
+        # measurements unless the value matches too
+        if _GENERIC_NAME_RE.match(key[0]):
+            key = key + (m.get("value"),)
         current_priority = priority.get(m.get("context", ""), 0)
 
         if key not in seen:
@@ -207,7 +215,7 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
     ("rt ovary", "right_ovary_size"),
     ("left ovary", "left_ovary_size"),
     ("lt ovary", "left_ovary_size"),
-    ("prostate", "prostate_notes"),
+    ("prostate", "prostate_size"),
     # Doppler
     ("right uterine artery", "doppler_right_pi"),
     ("rt uterine artery", "doppler_right_pi"),
@@ -243,7 +251,7 @@ _FIELD_UNITS: dict[str, str] = {
     # dimensionless - Doppler indices carry no unit in the template
     "doppler_right_pi": "", "doppler_left_pi": "",
     "doppler_umbilical_pi": "", "doppler_mca_pi": "",
-    "prostate_notes": "",
+    "prostate_size": "cm",
 }
 
 # Source unit strings (as they arrive from DICOM SR MeasurementUnitsCodeSequence
@@ -439,11 +447,14 @@ def generate_docx_from_dicom(
     filename: str = "",
     images: list[bytes] = None,
     clinic_info: dict = None,
+    scan_type: str | None = None,
 ) -> tuple[Path | None, str | None, float]:
     """
     Classify scan type from DICOM and generate the matching .docx report.
 
-    Classification order:
+    `scan_type`, when given, is used as is (chosen by the doctor in the
+    dashboard). Otherwise, classification order (see scan_classifier):
+      0. Exam type chosen on the scanner (+ gestational age for OB)
       1. DICOM tags  (StudyDescription, ProtocolName, SeriesDescription)
       2. OCR text    (keywords burned into ultrasound image pixels)
       3. Measurements fingerprinting (which measurement names are present)
@@ -456,8 +467,11 @@ def generate_docx_from_dicom(
         `dropped` counts measurements left out because their units could not
         be reconciled with the template's.
     """
-    # --- Classify ---
-    scan_type, confidence, method = classify_scan(ds, measurements)
+    # --- Classify (unless the doctor chose the report type in the dashboard) ---
+    if scan_type:
+        confidence, method = 1.0, "chosen in dashboard"
+    else:
+        scan_type, confidence, method = classify_scan(ds, measurements)
 
     # Fallback: try filename if DICOM/OCR/fingerprint returned nothing
     if scan_type == "unknown" and filename:
@@ -529,6 +543,54 @@ def _compute_review_flags(
     return bool(reasons), "; ".join(reasons)
 
 
+SCAN_DATA_DIR = Path(config.OUTPUT_DIR) / "scan_data"
+_NON_CLINICAL_RE = re.compile(r"(id|name|sex|date|exam)", re.I)
+
+
+def scan_data_dir(orthanc_study_id: str) -> Path:
+    return SCAN_DATA_DIR / re.sub(r"[^A-Za-z0-9-]", "", orthanc_study_id)
+
+
+def _save_scan_data(study_id: str, scan_images: list[dict], measurements: list[dict]) -> None:
+    """
+    Save the scan's images (JPEG) and the values read from each, plus the
+    scanner's labelled report values, for the dashboard's "Measurements from
+    scan" panel - the doctor sees each image with its numbers beside the
+    report and can put any value into it with a click.
+    """
+    from PIL import Image
+
+    folder = scan_data_dir(study_id)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.glob("image_*.jpg"):
+            old.unlink()
+        images = []
+        for n, item in enumerate(sorted(scan_images, key=lambda i: i["order"]), 1):
+            name = f"image_{n:02d}.jpg"
+            Image.open(io.BytesIO(item["png"])).convert("RGB").save(folder / name, "JPEG", quality=85)
+            images.append({
+                "file": name,
+                "preset": item["preset"],
+                "values": [_value_entry(m) for m in item["values"] if m.get("context") == "OCR"],
+            })
+        report_values = [
+            _value_entry(m) for m in measurements
+            if m.get("context") == "SR" and m.get("unit") not in ("text", "date")
+            and not _NON_CLINICAL_RE.search(str(m.get("measurement_name", "")))
+        ]
+        (folder / "scan.json").write_text(json.dumps({"images": images, "report_values": report_values}, indent=1))
+    except Exception as e:
+        print(f"  [SCAN DATA] Could not save images for the dashboard: {e}")
+
+
+def _value_entry(m: dict) -> dict:
+    value = m.get("text") or m.get("value")
+    if isinstance(value, float):
+        value = f"{value:g}"
+    return {"name": str(m.get("measurement_name", "")), "value": str(value), "unit": str(m.get("unit", ""))}
+
+
 def extract_patient_info(ds: pydicom.Dataset) -> dict:
     """Extract patient and study info from DICOM dataset."""
     def safe(tag):
@@ -588,9 +650,11 @@ def extract_patient_info(ds: pydicom.Dataset) -> dict:
 # Pipeline modes
 # ---------------------------------------------------------------------------
 
-def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
+def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str | None = None) -> Path:
     """
-    Process a single study from Orthanc and generate a PDF report.
+    Process a single study from Orthanc and generate its report. `scan_type`
+    forces the report form (chosen by the doctor in the dashboard) instead of
+    detecting it.
 
     Returns:
         Path to the generated report (Word, or the measurements PDF)
@@ -614,6 +678,8 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     last_ds = None
     # Classify from an image: only images carry the scanner preset
     image_ds = None
+    # Every image with its own values, for the dashboard's scan panel
+    scan_images: list[dict] = []
 
     series_ids = client.list_series(study_id)
     for series_id in series_ids:
@@ -639,14 +705,23 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
                     print(f"    → {len(measurements)} measurement(s) from instance {instance_id[:8]}...")
                     all_measurements.extend(measurements)
 
-                # Collect representative scan images (skips SR - no pixel data)
-                if len(report_images) < config.MAX_REPORT_IMAGES:
-                    png_bytes = dicom_to_png_bytes(ds)
-                    if png_bytes:
+                # Collect scan images (skips SR - no pixel data); the first
+                # few also go at the end of the Word report
+                png_bytes = dicom_to_png_bytes(ds)
+                if png_bytes:
+                    if len(report_images) < config.MAX_REPORT_IMAGES:
                         report_images.append(png_bytes)
+                    scan_images.append({
+                        "png": png_bytes,
+                        "order": (str(ds.get("ContentTime", "")), int(ds.get("InstanceNumber", 0) or 0)),
+                        "preset": str(ds.get("ProcessingFunction", "")),
+                        "values": measurements,
+                    })
 
             except Exception as e:
                 print(f"    [ERROR] Instance {instance_id[:8]}: {e}")
+
+    _save_scan_data(study_id, scan_images, all_measurements)
 
     # Deduplicate across all instances
     all_measurements = _deduplicate_measurements(all_measurements)
@@ -665,14 +740,14 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     clinic_id = dashboard_db.get_default_clinic_id()
     clinic_info = dashboard_db.get_clinic_info(clinic_id)
 
-    # Also generate a .docx report (auto-detect scan type)
-    # Use the last DICOM dataset for classification (SR or image)
+    # Generate the .docx report (scan type detected, unless chosen in the dashboard)
+    chosen_type = scan_type
     docx_path, scan_type, confidence, dropped = None, None, 0.0, 0
     try:
         if last_ds is not None:
             docx_path, scan_type, confidence, dropped = generate_docx_from_dicom(
                 image_ds or last_ds, all_measurements, patient_info, images=report_images,
-                clinic_info=clinic_info,
+                clinic_info=clinic_info, scan_type=chosen_type,
             )
     except Exception as e:
         print(f"  [DOCX] Could not generate .docx: {e}")

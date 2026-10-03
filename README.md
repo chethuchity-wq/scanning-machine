@@ -137,10 +137,28 @@ dashboard refuses every connection that doesn't come from the PC itself. Every r
 
 ## Output
 
-Each scan gets one report: the Word report (see below), shown as one row in the
-dashboard worklist. The worklist shows one study date per page (today by
-default, with previous/next day buttons and a date picker) and numbers the
-day's scans 1, 2, 3... in the order they arrived.
+Each scan gets one report: the Word report (see below). In the dashboard:
+
+- **Sidebar** — search box, then a Year > Month > Day tree with scan counts;
+  the open day lists its patients 1, 2, 3... in arrival order, with a status
+  dot (awaiting doctor / reviewed / not identified). Only the open year lists
+  its days, so it stays fast as years of data build up.
+- **Day page** — the day's scans as a table, previous/next day, date picker.
+- **Scan page** — patient details on top and the Word report below as an A4
+  page, editable in place (`webapp/docx_editor.py`): text, bold/italic/
+  underline, new or deleted lines and impression bullets. Save (Ctrl+S) writes
+  into the same `.docx`, keeping its layout; a save is refused if the file was
+  changed in Word meanwhile, or while it is open in Word. Alt+Up/Down moves to
+  the previous/next patient of the day.
+  **Report type** (top right) remakes the report as another form from the
+  scan in Orthanc - for a wrong exam type on the scanner (e.g. left on OB for
+  an abdomen scan) or a scan that wasn't identified. The old file is kept.
+  **Measurements from scan** (right) shows every scan image with the values
+  read from it (`reports/scan_data/<study>/`, saved by the pipeline) and the
+  scanner's labelled report values: click in the report, then click a value
+  to put it there - into a `____` blank if the caret is on one. Values the
+  scan didn't provide print as `____` so they can't be missed.
+- **Search** — name or patient ID (any part), date range, scan type, status.
 
 A PDF is made only when the PDF button is clicked: Microsoft Word converts the
 Word report (`docx_pdf.py`), saving it next to it in `reports/filled/`, and
@@ -209,8 +227,9 @@ normal findings, notes, advice) prints exactly as written in the form.
 
 The forms are laid out by `tools/build_templates.py`: patient details box,
 measurement and Doppler tables, aligned findings, impression, PCPNDT declaration
-and doctor's signature, in black and white with a 1.5" top margin for the
-clinic's pre-printed letterhead. Re-running it overwrites `templates/`.
+and doctor's signature, in black and white, for the clinic's pre-printed
+letterhead: 1.5" top margin for its header, 1.85" bottom margin for its ~1.4"
+(3.5 cm) footer band, with the page-number line just above that band. Re-running it overwrites `templates/`.
 
 To change a report's wording, edit `tools/build_templates.py` and re-run it (or
 edit the template in Word, keeping the `{{...}}` markers intact). A scan type without a template falls back to the built-in layout

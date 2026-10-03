@@ -1,0 +1,55 @@
+{# Left sidebar: quick search, then year > month > day, with the open day's patients #}
+<aside class="sidebar">
+  <form class="quick-search" method="get" action="/search">
+    <input type="search" name="q" value="{{ q or '' }}" placeholder="Search name or patient ID" aria-label="Search name or patient ID">
+  </form>
+  <a class="side-today {{ 'active' if open_day == today and not study }}" href="/">Today &middot; {{ today.strftime("%d %b %Y") }}</a>
+
+  <nav class="tree" aria-label="Scans by date">
+    {% for y in calendar %}
+    <details class="year" {{ 'open' if y.open }}>
+      <summary><span>{{ y.year }}</span><span class="count">{{ y.total }}</span></summary>
+      {% for m in y.months %}
+        {% if y.open %}
+        <details class="month" {{ 'open' if m.open }}>
+          <summary><span>{{ m.label }}</span><span class="count">{{ m.total }}</span></summary>
+          <ul class="days">
+            {% for d in m.days %}
+            {% set is_open = open_day and d.iso == open_day.isoformat() %}
+            <li>
+              <a class="day {{ 'active' if is_open and not study }}" href="/?day={{ d.iso }}">
+                <span>{{ d.label }}</span><span class="count">{{ d.count }}</span>
+              </a>
+              {% if is_open %}
+              <ol class="patients">
+                {% for p in day_patients %}
+                <li>
+                  <a href="/study/{{ p.study_id }}" class="{{ 'active' if study and study.study_id == p.study_id }}" title="{{ p.scan_name }} - {{ status_names[p.document_status] }}">
+                    <span class="dot dot-{{ p.document_status }}{{ ' dot-flag' if p.needs_review }}"></span>
+                    <span class="pn">{{ p.number }}</span>
+                    <span class="name">{{ p.patient_name }}</span>
+                  </a>
+                </li>
+                {% endfor %}
+              </ol>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% else %}
+        <a class="month-link" href="/?day={{ m.latest }}"><span>{{ m.label }}</span><span class="count">{{ m.total }}</span></a>
+        {% endif %}
+      {% endfor %}
+    </details>
+    {% else %}
+    <p class="hint side-empty">No scans yet.</p>
+    {% endfor %}
+  </nav>
+
+  <div class="legend">
+    <span><span class="dot dot-draft"></span>Awaiting doctor</span>
+    <span><span class="dot dot-reviewed"></span>Reviewed</span>
+    <span><span class="dot dot-measurements"></span>Not identified</span>
+  </div>
+</aside>

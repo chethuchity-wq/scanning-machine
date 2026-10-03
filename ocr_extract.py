@@ -302,6 +302,70 @@ def _clean_label(label: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The scanner's measurement box (Philips: bottom-left, white on black)
+# ---------------------------------------------------------------------------
+# "+ Dist 9.70 cm", "x Dist 4.34 cm", "Dist1 8.41 cm", "Volume 418 ml". The
+# box grows upward with more lines, and its small font loses decimal points
+# unless enlarged, so it gets its own reading: a tall crop, enlarged 3x, at
+# several contrast thresholds, keeping the reading with the most valid values.
+MEASUREMENT_BOX = (0.0, 0.55, 0.32, 0.45)   # x, y, width, height as fractions
+_BOX_LINE = re.compile(
+    r"\b(?P<name>Dist|Volume|Vol|Area|Circ|Angle)\s*(?P<index>\d)?\s+"
+    r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>cm2|cm|mm|ml|cc)\b",
+    re.IGNORECASE,
+)
+
+
+def _read_box(img: Image.Image, threshold: int) -> list[dict]:
+    box = _crop_region(img.convert("L"), MEASUREMENT_BOX)
+    box = box.resize((box.width * 3, box.height * 3), Image.LANCZOS)
+    box = ImageOps.invert(box).point(lambda x: 255 if x > threshold else 0)
+    try:
+        text = pytesseract.image_to_string(box, config="--psm 6")
+    except Exception as e:
+        print(f"  [OCR] Tesseract error: {e}")
+        return []
+    found = []
+    for m in _BOX_LINE.finditer(text):
+        unit = m.group("unit").lower()
+        value = m.group("value")
+        # The scanner always prints lengths with a decimal ("9.70", "11.9");
+        # a length without one is a misread ("894" for 8.94) - never guess
+        if unit in ("cm", "mm") and "." not in value:
+            continue
+        found.append({
+            "measurement_name": m.group("name").title() + (m.group("index") or ""),
+            "value": float(value),
+            "text": value,  # as printed on the image, e.g. "9.70"
+            "unit": unit,
+            "context": "OCR",
+            "confidence": 90.0,
+        })
+    return found
+
+
+def read_measurement_box(ds_or_img) -> list[dict]:
+    """Every value in the scanner's on-image measurement box, in order."""
+    if not HAS_PIL or not HAS_TESSERACT:
+        return []
+    img = ds_or_img if isinstance(ds_or_img, Image.Image) else _pixel_array_to_image(ds_or_img)
+    if img is None:
+        return []
+    passes = [_read_box(img, t) for t in (140, 110, 90)]
+    best = max(passes, key=len)
+    # Each threshold can miss a different line: add uniquely named values
+    # ("Dist1", "Volume") found only by another pass. Repeated plain "Dist"
+    # lines can't be matched up between passes, so those come from `best` only.
+    names = {m["measurement_name"] for m in best}
+    for other in passes:
+        for m in other:
+            if m["measurement_name"] not in names and m["measurement_name"] != "Dist":
+                best.append(m)
+                names.add(m["measurement_name"])
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Main extraction function
 # ---------------------------------------------------------------------------
 
@@ -329,10 +393,15 @@ def extract_measurements_ocr(ds: Dataset) -> list[dict]:
     if img is None:
         return []
 
-    all_measurements = []
+    # The measurement box first: it reads the bottom-left area properly, so
+    # the generic bottom-left region below (which cut its top lines off and
+    # lost decimals) is skipped when the box has values
+    all_measurements = read_measurement_box(img)
 
     # Strategy 1: OCR specific annotation regions
     for region_name, region_coords in config.OCR_REGIONS.items():
+        if region_name == "bottom_left" and all_measurements:
+            continue
         try:
             cropped = _crop_region(img, region_coords)
             processed = _preprocess_for_ocr(cropped)
