@@ -36,7 +36,10 @@ MARGIN_SIDE = Cm(1.5)
 CONTENT_W = (21.0 - 2 * 1.5) / 2.54  # inches
 
 FONT = "Calibri"
-BODY_PT, TABLE_PT, NOTE_PT = 11, 10.5, 9
+# Clinic's print sizes: body 13 pt; title, tables, notes and footer a step
+# up from Word's defaults
+BODY_PT, TABLE_PT, NOTE_PT = 13, 11.5, 10
+TITLE_PT, FOOTER_PT = 15, 9
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +63,7 @@ def new_doc() -> Document:
     normal.paragraph_format.line_spacing = 1.0
     # Word re-renders page-number fields in the paragraph style's font, so
     # the footer's size is set on the style, not the runs
-    doc.styles["Footer"].font.size = Pt(8)
+    doc.styles["Footer"].font.size = Pt(FOOTER_PT)
     _footer(section)
     return doc
 
@@ -72,7 +75,7 @@ def _field(paragraph, instr: str) -> None:
     run = OxmlElement("w:r")
     r_pr = OxmlElement("w:rPr")
     size = OxmlElement("w:sz")
-    size.set(qn("w:val"), "16")  # half-points: 8pt
+    size.set(qn("w:val"), str(FOOTER_PT * 2))  # half-points
     r_pr.append(size)
     run.append(r_pr)
     text = OxmlElement("w:t")
@@ -91,17 +94,18 @@ def _footer(section) -> None:
     p.add_run(" of ")
     _field(p, "NUMPAGES")
     for run in p.runs:
-        run.font.size = Pt(8)
+        run.font.size = Pt(FOOTER_PT)
 
 
 def title(doc: Document, text: str) -> None:
+    doc.add_paragraph()  # blank line below the letterhead header
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.space_after = Pt(8)
     run = p.add_run(text)
     run.bold = True
     run.underline = True
-    run.font.size = Pt(14)
+    run.font.size = Pt(TITLE_PT)
 
 
 def heading(doc: Document, text: str) -> None:
