@@ -302,13 +302,7 @@ def _classify_from_exam(ds: Dataset, measurements: list[dict]) -> Optional[tuple
         return "abdomen_pelvis_female", 0.90, f"exam:{preset}"
 
     if exam == "ABDOMEN":
-        sex = _tag_text(ds, (0x0010, 0x0040))  # PatientSex
-        if sex == "M":
-            return "abdomen_pelvis_male", 0.90, "exam:Abdomen"
-        if sex == "F":
-            return "abdomen_pelvis_female", 0.90, "exam:Abdomen"
-        # No sex entered on the scanner: female form, flagged as uncertain
-        return "abdomen_pelvis_female", 0.45, "exam:Abdomen (sex not entered)"
+        return _abdomen_by_sex(ds, 0.90, "exam:Abdomen")
 
     if exam == "OB":
         weeks = _gestational_weeks(measurements)
@@ -319,7 +313,21 @@ def _classify_from_exam(ds: Dataset, measurements: list[dict]) -> Optional[tuple
         fp = _fingerprint_measurements([str(m.get("measurement_name", "")) for m in measurements])
         if fp and fp[0] in OB_SCAN_TYPES:
             return fp[0], 0.80, "exam:OB + measurements"
+        # Exam left on OB from the previous patient but scanned on an abdomen
+        # preset, with no foetal measurements: trust the preset, flagged
+        if preset.startswith("ABD"):
+            return _abdomen_by_sex(ds, 0.45, f"exam:OB but preset {preset}")
     return None
+
+
+def _abdomen_by_sex(ds: Dataset, confidence: float, method: str) -> tuple[str, float, str]:
+    """Abdomen & pelvis form for the patient's sex; female, flagged, if not entered."""
+    sex = _tag_text(ds, (0x0010, 0x0040))  # PatientSex
+    if sex == "M":
+        return "abdomen_pelvis_male", confidence, method
+    if sex == "F":
+        return "abdomen_pelvis_female", confidence, method
+    return "abdomen_pelvis_female", min(confidence, 0.45), method + " (sex not entered)"
 
 
 # ---------------------------------------------------------------------------

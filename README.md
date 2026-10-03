@@ -229,6 +229,8 @@ qualification come from the dashboard Settings page.
    sex (female, flagged for review, when no sex was entered). `OB` → form by
    gestational age (scanner GA, else Hadlock from FL/BPD): under 11 weeks early
    pregnancy, 11–13 NT, 14–27 anomaly, 28+ growth (`OB_FORM_BY_GA_WEEKS`).
+   An `OB` exam with no gestational age but scanned on an `ABD_*` preset (exam
+   left on OB from the previous patient) gets the abdomen form, flagged.
 1. **DICOM metadata** — `StudyDescription`, `ProtocolName`, `SeriesDescription`
 2. **OCR** — Tesseract reads burned-in text from the image pixels
 3. **Measurement fingerprinting** — Infers type from which measurements are present (e.g. NT + CRL → NT scan)
