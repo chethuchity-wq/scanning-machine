@@ -22,18 +22,18 @@ from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt
+from docx.shared import Cm, Inches, Pt
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-# Page: A4, printed on the clinic's pre-printed letterhead: the top margin clears
-# its header; the bottom margin clears its ~1.4" (3.5 cm) footer band, with the
-# page-number line just above that band.
-PAGE_W, PAGE_H = Inches(8.27), Inches(11.69)
-MARGIN_TOP, MARGIN_BOTTOM = Inches(1.5), Inches(1.85)
-FOOTER_DISTANCE = Inches(1.5)
-MARGIN_SIDE = Inches(0.75)
-CONTENT_W = 8.27 - 2 * 0.75  # inches
+# Page: A4, printed on the clinic's pre-printed letterhead, which needs 3.5 cm
+# clear at the top (its header) and 2.5 cm at the bottom (its footer); 1.5 cm
+# at the sides. The page-number line sits just above the footer band.
+PAGE_W, PAGE_H = Cm(21.0), Cm(29.7)
+MARGIN_TOP, MARGIN_BOTTOM = Cm(3.5), Cm(3.2)
+FOOTER_DISTANCE = Cm(2.6)
+MARGIN_SIDE = Cm(1.5)
+CONTENT_W = (21.0 - 2 * 1.5) / 2.54  # inches
 
 FONT = "Calibri"
 BODY_PT, TABLE_PT, NOTE_PT = 11, 10.5, 9

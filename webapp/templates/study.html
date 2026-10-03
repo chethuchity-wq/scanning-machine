@@ -67,7 +67,7 @@
     <div class="study-body">
       {% if document %}
       <div class="editor-wrap">
-        <div class="page" style="width:{{ '%.2f'|format(document.page.width) }}in; padding:0 {{ '%.2f'|format(document.page.right) }}in 0 {{ '%.2f'|format(document.page.left) }}in">
+        <div class="page" style="width:{{ '%.2f'|format(document.page.width) }}in; padding:0 {{ '%.2f'|format(document.page.right) }}in 0 {{ '%.2f'|format(document.page.left) }}in; --ml:{{ '%.2f'|format(document.page.left) }}in; --mr:{{ '%.2f'|format(document.page.right) }}in">
           <div class="letterhead-space" style="height:{{ '%.2f'|format(document.page.top) }}in"><span>Letterhead</span></div>
           <div id="editor" class="doc" contenteditable="true" spellcheck="true"
                data-version="{{ document.version }}"

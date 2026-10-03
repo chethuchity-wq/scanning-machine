@@ -236,8 +236,9 @@ normal findings, notes, advice) prints exactly as written in the form.
 The forms are laid out by `tools/build_templates.py`: patient details box,
 measurement and Doppler tables, aligned findings, impression, PCPNDT declaration
 and doctor's signature, in black and white, for the clinic's pre-printed
-letterhead: 1.5" top margin for its header, 1.85" bottom margin for its ~1.4"
-(3.5 cm) footer band, with the page-number line just above that band. Re-running it overwrites `templates/`.
+letterhead: 3.5 cm clear at the top for its header, 2.5 cm at the bottom for
+its footer (page-number line just above it, text ends at 3.2 cm), 1.5 cm at
+the sides. Re-running it overwrites `templates/`.
 
 To change a report's wording, edit `tools/build_templates.py` and re-run it (or
 edit the template in Word, keeping the `{{...}}` markers intact). A scan type without a template falls back to the built-in layout

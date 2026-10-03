@@ -518,7 +518,7 @@ a.patient:hover { color: var(--blue); text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 -0.75in;
+  margin: 0 calc(-1 * var(--mr, 0.75in)) 0 calc(-1 * var(--ml, 0.75in));
   border-bottom: 1px dashed #d5dce2;
   background: repeating-linear-gradient(-45deg, #fafbfc, #fafbfc 8px, #f3f5f7 8px, #f3f5f7 16px);
   color: #b3bcc5;
@@ -561,7 +561,7 @@ a.patient:hover { color: var(--blue); text-decoration: underline; }
 
 .doc .dp-img { text-align: center; }
 .doc .dp-img img { max-width: 100%; }
-.doc .page-break { margin: 18px -0.75in; border-top: 2px dashed #c6d0d8; height: 0; }
+.doc .page-break { margin: 18px calc(-1 * var(--mr, 0.75in)) 18px calc(-1 * var(--ml, 0.75in)); border-top: 2px dashed #c6d0d8; height: 0; }
 
 .pdf-frame { flex: 1; width: 100%; border: 0; min-height: 70vh; background: #e9edf1; }
 

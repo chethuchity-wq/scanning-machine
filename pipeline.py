@@ -636,6 +636,17 @@ def _value_entry(m: dict) -> dict:
     return {"name": str(m.get("measurement_name", "")), "value": str(value), "unit": str(m.get("unit", ""))}
 
 
+_NAME_AGE_RE = re.compile(r"^(?P<name>.*?[A-Za-z].*?)[\s.,-]+(?P<age>\d{1,3})\s*(?:y|yr|yrs|years?)?\.?$", re.I)
+
+
+def split_name_age(name: str) -> tuple[str, str]:
+    """("ARUN KUMAR 27") -> ("ARUN KUMAR", "27"); a name without a trailing age is unchanged."""
+    m = _NAME_AGE_RE.match(name.strip())
+    if m and 0 < int(m.group("age")) <= 120:
+        return m.group("name").strip(), str(int(m.group("age")))
+    return name, ""
+
+
 def extract_patient_info(ds: pydicom.Dataset) -> dict:
     """Extract patient and study info from DICOM dataset."""
     def safe(tag):
@@ -676,10 +687,14 @@ def extract_patient_info(ds: pydicom.Dataset) -> dict:
         # DICOM names pad empty components: "MADHULATHA^^^^" -> "MADHULATHA"
         return " ".join(safe(tag).replace("^", " ").split())
 
+    # The clinic types the age after the name ("ARUN KUMAR 27") because the
+    # scanner's age field is left empty: move it to the age
+    patient_name, name_age = split_name_age(person_name((0x0010, 0x0010)))
+
     return {
-        "patient_name": person_name((0x0010, 0x0010)),
+        "patient_name": patient_name,
         "patient_id": safe((0x0010, 0x0020)),
-        "age": age,
+        "age": age or name_age,
         "sex": sex,            # "M" or "F"
         "dob": dob,
         "study_date": study_date,

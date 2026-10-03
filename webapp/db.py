@@ -207,6 +207,9 @@ def record_report(
                 .filter_by(clinic_id=clinic_id, orthanc_study_id=orthanc_study_id)
                 .first()
             )
+        if study is not None:
+            # A remade report may read the name better (e.g. age split off)
+            study.patient_name = patient_name or study.patient_name
         if study is None:
             study = Study(
                 clinic_id=clinic_id,
