@@ -2,8 +2,9 @@
 Scan Type Classifier
 =====================
 Automatically identifies which ultrasound report type to generate
-from a DICOM file, using three layers (tried in order):
+from a DICOM file, using these layers (tried in order):
 
+  Layer 0 – Exam type   : exam and preset chosen on the scanner (+ GA for OB)
   Layer 1 – DICOM tags  : StudyDescription / SeriesDescription / ProtocolName
   Layer 2 – OCR text    : Keywords burned into the ultrasound image screen
   Layer 3 – Measurements: Which measurement names are present (fingerprinting)
@@ -126,6 +127,28 @@ DESCRIPTION_TAGS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Exam type chosen on the scanner (Philips Affiniti)
+# ---------------------------------------------------------------------------
+# The exam picked at the start of a scan is sent in every image and SR as
+# CommentsOnThePerformedProcedureStep ("OB", "Abdomen"); the imaging preset
+# as ProcessingFunction ("OB_GENERAL", "ABD_RENAL", "GYN_FERTILITY", ...).
+# ProtocolName is always "Free Form" and says nothing.
+EXAM_TYPE_TAG = (0x0040, 0x0280)        # CommentsOnThePerformedProcedureStep
+PRESET_TAG = (0x0018, 0x5020)           # ProcessingFunction
+
+# Obstetric form by gestational age: (below this many weeks, form)
+OB_FORM_BY_GA_WEEKS = [
+    (11, "early_pregnancy"),
+    (14, "nt_scan"),
+    (28, "anomaly_scan"),
+    (99, "growth_scan"),
+]
+OB_SCAN_TYPES = {"early_pregnancy", "nt_scan", "anomaly_scan", "growth_scan"}
+
+# Measurements that give the gestational age, best first
+_GA_MEASUREMENTS = ("composite ultrasound age", "gestational age", "gestational age by lmp")
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -204,6 +227,99 @@ def _fingerprint_measurements(measurement_names: list[str]) -> Optional[tuple[st
         return None
 
     return best, confidence
+
+
+# ---------------------------------------------------------------------------
+# Layer 0: exam type chosen on the scanner
+# ---------------------------------------------------------------------------
+
+def _tag_text(ds: Dataset, tag: tuple[int, int]) -> str:
+    element = ds.get(tag)
+    return str(element.value).strip().upper() if element is not None else ""
+
+
+def _gestational_weeks(measurements: list[dict]) -> Optional[float]:
+    """Gestational age in weeks from the scanner's measurements, if any."""
+    by_name = {}
+    for m in measurements:
+        by_name.setdefault(_normalise(str(m.get("measurement_name", ""))), m)
+    for name in _GA_MEASUREMENTS:
+        m = by_name.get(name)
+        if m is None:
+            continue
+        unit = _normalise(str(m.get("unit", "")))
+        try:
+            value = float(m.get("value"))
+        except (TypeError, ValueError):
+            continue
+        if unit in ("d", "day", "days"):
+            return value / 7
+        if unit in ("wk", "wks", "week", "weeks"):
+            return value
+    return _weeks_from_biometry(by_name)
+
+
+# Hadlock: gestational age (weeks) from a single biometry value in cm. Only
+# picks the report form when the scanner sent no GA (no SR, values read from
+# the image) - accurate to a week or two, plenty for that.
+_HADLOCK = {
+    "femur length": lambda cm: 10.35 + 2.460 * cm + 0.170 * cm ** 2,
+    "fl": lambda cm: 10.35 + 2.460 * cm + 0.170 * cm ** 2,
+    "biparietal diameter": lambda cm: 9.54 + 1.482 * cm + 0.1676 * cm ** 2,
+    "bpd": lambda cm: 9.54 + 1.482 * cm + 0.1676 * cm ** 2,
+}
+
+
+def _weeks_from_biometry(by_name: dict[str, dict]) -> Optional[float]:
+    for name, formula in _HADLOCK.items():
+        m = by_name.get(name)
+        if m is None:
+            continue
+        unit = _normalise(str(m.get("unit", "")))
+        try:
+            value = float(m.get("value"))
+        except (TypeError, ValueError):
+            continue
+        cm = {"cm": value, "mm": value / 10}.get(unit)
+        if cm and 0.5 <= cm <= 12:
+            return formula(cm)
+    return None
+
+
+def _classify_from_exam(ds: Dataset, measurements: list[dict]) -> Optional[tuple[str, float, str]]:
+    """
+    Use the exam type and preset chosen on the scanner. These say which body
+    region was scanned; for an obstetric exam the form is then chosen by
+    gestational age, or failing that by which measurements were taken.
+    Returns None when the exam type is missing or the form can't be decided.
+    """
+    exam = _tag_text(ds, EXAM_TYPE_TAG)
+    preset = _tag_text(ds, PRESET_TAG)
+
+    if preset == "GYN_FERTILITY":
+        return "follicular_study", 0.90, "exam:GYN_FERTILITY"
+    if preset.startswith("GYN"):
+        return "abdomen_pelvis_female", 0.90, f"exam:{preset}"
+
+    if exam == "ABDOMEN":
+        sex = _tag_text(ds, (0x0010, 0x0040))  # PatientSex
+        if sex == "M":
+            return "abdomen_pelvis_male", 0.90, "exam:Abdomen"
+        if sex == "F":
+            return "abdomen_pelvis_female", 0.90, "exam:Abdomen"
+        # No sex entered on the scanner: female form, flagged as uncertain
+        return "abdomen_pelvis_female", 0.45, "exam:Abdomen (sex not entered)"
+
+    if exam == "OB":
+        weeks = _gestational_weeks(measurements)
+        if weeks is not None:
+            for limit, scan_type in OB_FORM_BY_GA_WEEKS:
+                if weeks < limit:
+                    return scan_type, 0.90, f"exam:OB, GA {weeks:.1f} weeks"
+        fp = _fingerprint_measurements([str(m.get("measurement_name", "")) for m in measurements])
+        if fp and fp[0] in OB_SCAN_TYPES:
+            return fp[0], 0.80, "exam:OB + measurements"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +456,12 @@ def classify_scan(
         >>> classify_scan(ds)
         ("nt_scan", 0.95, "dicom_tag:0x8,0x1030")
     """
+    # Layer 0: exam type chosen on the scanner. Even an uncertain answer here
+    # (abdomen exam, sex not entered) beats guessing from the other layers.
+    exam_result = _classify_from_exam(ds, measurements or [])
+    if exam_result:
+        return exam_result
+
     # Layer 1: DICOM metadata tags (fastest, most reliable)
     result = _classify_from_tags(ds)
     if result and result[1] >= 0.80:

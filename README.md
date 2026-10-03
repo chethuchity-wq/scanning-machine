@@ -219,8 +219,16 @@ qualification come from the dashboard Settings page.
 
 ### Scan type classification
 
-`scan_classifier.py` detects the scan type automatically using three layers:
+`scan_classifier.py` detects the scan type automatically, in this order:
 
+0. **Exam type chosen on the scanner** — the Philips Affiniti sends it as
+   `CommentsOnThePerformedProcedureStep` (0040,0280: `OB`, `Abdomen`) and the
+   preset as `ProcessingFunction` (0018,5020: `OB_GENERAL`, `ABD_GENERAL`,
+   `GYN_PELVIC`, `GYN_FERTILITY`...). `GYN_FERTILITY` → follicular study, other
+   `GYN_*` → abdomen & pelvis (female), `Abdomen` → abdomen & pelvis by patient
+   sex (female, flagged for review, when no sex was entered). `OB` → form by
+   gestational age (scanner GA, else Hadlock from FL/BPD): under 11 weeks early
+   pregnancy, 11–13 NT, 14–27 anomaly, 28+ growth (`OB_FORM_BY_GA_WEEKS`).
 1. **DICOM metadata** — `StudyDescription`, `ProtocolName`, `SeriesDescription`
 2. **OCR** — Tesseract reads burned-in text from the image pixels
 3. **Measurement fingerprinting** — Infers type from which measurements are present (e.g. NT + CRL → NT scan)

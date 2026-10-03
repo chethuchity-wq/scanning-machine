@@ -612,6 +612,8 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     report_images: list[bytes] = []
     patient_info = None
     last_ds = None
+    # Classify from an image: only images carry the scanner preset
+    image_ds = None
 
     series_ids = client.list_series(study_id)
     for series_id in series_ids:
@@ -624,6 +626,8 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
             try:
                 ds = client.get_instance_as_dataset(instance_id)
                 last_ds = ds
+                if image_ds is None and str(ds.get("Modality", "")).upper() == "US":
+                    image_ds = ds
 
                 # Get patient info from first dataset
                 if patient_info is None:
@@ -667,7 +671,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     try:
         if last_ds is not None:
             docx_path, scan_type, confidence, dropped = generate_docx_from_dicom(
-                last_ds, all_measurements, patient_info, images=report_images,
+                image_ds or last_ds, all_measurements, patient_info, images=report_images,
                 clinic_info=clinic_info,
             )
     except Exception as e:
@@ -746,6 +750,7 @@ def process_local_folder(folder_path: str) -> Path:
     all_measurements = []
     report_images: list[bytes] = []
     patient_info = None
+    image_ds = None
 
     for i, dcm_path in enumerate(dcm_files, 1):
         try:
@@ -757,6 +762,8 @@ def process_local_folder(folder_path: str) -> Path:
         # Get patient info from first readable file
         if patient_info is None:
             patient_info = extract_patient_info(ds)
+        if image_ds is None and str(ds.get("Modality", "")).upper() == "US":
+            image_ds = ds
 
         # Extract measurements
         measurements = process_dataset(ds, filename=dcm_path.name)
@@ -791,7 +798,7 @@ def process_local_folder(folder_path: str) -> Path:
     # Also generate a .docx report (auto-detect scan type from first DICOM file)
     docx_path, scan_type, confidence, dropped = None, None, 0.0, 0
     try:
-        first_ds = pydicom.dcmread(str(dcm_files[0]), force=True)
+        first_ds = image_ds or pydicom.dcmread(str(dcm_files[0]), force=True)
         docx_path, scan_type, confidence, dropped = generate_docx_from_dicom(
             first_ds, all_measurements, patient_info,
             filename=dcm_files[0].name,
