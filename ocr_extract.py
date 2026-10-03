@@ -366,6 +366,82 @@ def read_measurement_box(ds_or_img) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# The scanner's Doppler box (Philips: right side, beside the colour bar)
+# ---------------------------------------------------------------------------
+# "PSV 39.2 cm/s", "EDV 14.5 cm/s", "RI 0.63", "PI 1.00", "S/D 2.7",
+# "TAPV 24.7 cm/s". The colour bar next to it confuses a whole-image read.
+# The values are tied by the scanner's own formulas, which are used to check
+# every reading:  RI = (PSV - EDV) / PSV,  PI = (PSV - EDV) / TAPV,
+# S/D = PSV / EDV.
+DOPPLER_BOX = (0.72, 0.12, 0.235, 0.33)
+_DOPPLER_LINE = re.compile(r"\b(PSV|EDV|MDV|RI|PI|S/D|TAPV|TAMV)\s*[:=]?\s*(\d+\.\d+)", re.IGNORECASE)
+_VELOCITIES = ("PSV", "EDV", "MDV", "TAPV")
+
+
+def _read_doppler(img: Image.Image, threshold: int) -> dict:
+    box = _crop_region(img.convert("L"), DOPPLER_BOX)
+    box = box.resize((box.width * 3, box.height * 3), Image.LANCZOS)
+    box = ImageOps.invert(box).point(lambda x: 255 if x > threshold else 0)
+    try:
+        text = pytesseract.image_to_string(box, config="--psm 6")
+    except Exception as e:
+        print(f"  [OCR] Tesseract error: {e}")
+        return {}
+    found = {}
+    for m in _DOPPLER_LINE.finditer(text):
+        key = m.group(1).upper().replace("TAMV", "TAPV")
+        found.setdefault(key, m.group(2))  # every value is printed with a decimal
+    return found
+
+
+def _close(a: float, b: float, tolerance: float) -> bool:
+    return abs(a - b) <= tolerance * max(abs(b), 0.01)
+
+
+def read_doppler_box(ds_or_img) -> list[dict]:
+    """
+    PSV / EDV / RI / PI / S/D / TAPV from the Doppler box, checked against
+    each other. A value that disagrees with the others is recalculated when
+    its inputs agree, otherwise dropped - never printed unchecked.
+    """
+    if not HAS_PIL or not HAS_TESSERACT:
+        return []
+    img = ds_or_img if isinstance(ds_or_img, Image.Image) else _pixel_array_to_image(ds_or_img)
+    if img is None:
+        return []
+    texts: dict[str, str] = {}
+    for threshold in (140, 110, 90):
+        for key, value in _read_doppler(img, threshold).items():
+            texts.setdefault(key, value)
+    if not texts:
+        return []
+    v = {k: float(t) for k, t in texts.items()}
+    psv, edv, tapv = v.get("PSV"), v.get("EDV"), v.get("TAPV")
+
+    # PSV and EDV are trusted when the scanner's RI agrees with them
+    velocities_ok = psv and edv is not None and psv > edv and "RI" in v and _close((psv - edv) / psv, v["RI"], 0.04)
+    if not velocities_ok:
+        for k in ("PSV", "EDV", "MDV", "S/D"):
+            v.pop(k, None)
+    else:
+        sd = psv / edv if edv else None
+        if sd and ("S/D" not in v or not _close(sd, v["S/D"], 0.05)):
+            v["S/D"] = round(sd, 1)
+            texts["S/D"] = f"{v['S/D']:.1f}"
+        if tapv and tapv > 0:
+            pi = (psv - edv) / tapv
+            if "PI" not in v or not _close(pi, v["PI"], 0.05):
+                v["PI"] = round(pi, 2)
+                texts["PI"] = f"{v['PI']:.2f}"
+    order = ["PI", "RI", "S/D", "PSV", "EDV", "TAPV"]
+    return [
+        {"measurement_name": k, "value": v[k], "text": texts[k],
+         "unit": "cm/s" if k in _VELOCITIES else "", "context": "OCR", "confidence": 90.0}
+        for k in order if k in v
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Main extraction function
 # ---------------------------------------------------------------------------
 
@@ -397,10 +473,16 @@ def extract_measurements_ocr(ds: Dataset) -> list[dict]:
     # the generic bottom-left region below (which cut its top lines off and
     # lost decimals) is skipped when the box has values
     all_measurements = read_measurement_box(img)
+    # The Doppler box likewise has its own, checked reading; the generic
+    # right-hand regions it overlaps are then skipped
+    doppler = read_doppler_box(img)
+    all_measurements += doppler
 
     # Strategy 1: OCR specific annotation regions
     for region_name, region_coords in config.OCR_REGIONS.items():
         if region_name == "bottom_left" and all_measurements:
+            continue
+        if region_name in ("top_right", "right_panel") and doppler:
             continue
         try:
             cropped = _crop_region(img, region_coords)

@@ -499,6 +499,8 @@ a.patient:hover { color: var(--blue); text-decoration: underline; }
   cursor: pointer;
 }
 .value-chip:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
+.value-chip .cn { font-weight: 600; opacity: 0.75; }
+.cpr-calc { width: 100%; cursor: pointer; }
 .value-chip.used { background: #dcfce7; border-color: #bbe5c8; color: var(--success); }
 
 @media (max-width: 1500px) {

@@ -197,6 +197,7 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
     ("estimated foetal weight", "efw"),
     ("estimated fetal weight", "efw"),
     ("efw", "efw"),
+    ("estimated weight", "efw"),  # Philips SR name
     ("cervical length", "cervix_length"),
     ("cervix length", "cervix_length"),
     ("foetal heart rate", "fhr"),
@@ -647,14 +648,33 @@ def _save_scan_data(study_id: str, scan_images: list[dict], measurements: list[d
                 "preset": item["preset"],
                 "values": [_value_entry(m) for m in item["values"] if m.get("context") == "OCR"],
             })
-        report_values = [
-            _value_entry(m) for m in measurements
-            if m.get("context") == "SR" and m.get("unit") not in ("text", "date")
-            and not _NON_CLINICAL_RE.search(str(m.get("measurement_name", "")))
-        ]
+        report_values = _panel_report_values(measurements)
         (folder / "scan.json").write_text(json.dumps({"images": images, "report_values": report_values}, indent=1))
     except Exception as e:
         print(f"  [SCAN DATA] Could not save images for the dashboard: {e}")
+
+
+_PANEL_SKIP_RE = re.compile(r"\b(percentile|centile|z[- ]?score|rank|sd|ratio)\b", re.I)
+_PANEL_SKIP_UNITS = {"text", "date", "no units", "percent", "%", ""}
+
+
+def _panel_report_values(measurements: list[dict]) -> list[dict]:
+    """The scanner's labelled values for the scan panel: no ranks/scores, no repeats."""
+    seen, out = set(), []
+    for m in measurements:
+        name = str(m.get("measurement_name", ""))
+        if (m.get("context") != "SR" or str(m.get("unit", "")).lower() in _PANEL_SKIP_UNITS
+                or _NON_CLINICAL_RE.search(name) or _PANEL_SKIP_RE.search(name)):
+            continue
+        entry = _value_entry(m)
+        try:
+            entry["value"] = f"{float(entry['value']):.2f}".rstrip("0").rstrip(".")
+        except ValueError:
+            pass
+        if (entry["name"], entry["value"]) not in seen:
+            seen.add((entry["name"], entry["value"]))
+            out.append(entry)
+    return out
 
 
 def _value_entry(m: dict) -> dict:

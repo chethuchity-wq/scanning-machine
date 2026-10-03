@@ -431,6 +431,33 @@
     });
   }
 
+  // CPR = MCA PI / umbilical artery PI, from the two rows of the Doppler table
+  function rowNumber(label) {
+    var cell = rowCell(label);
+    var m = cell && /\d+(\.\d+)?/.exec(cell.textContent);
+    return m ? parseFloat(m[0]) : null;
+  }
+  var cprBtn = document.querySelector(".cpr-calc");
+  if (cprBtn) {
+    cprBtn.addEventListener("click", function () {
+      var mca = rowNumber("MCA flow"), ua = rowNumber("Umbilical artery");
+      if (!mca || !ua) {
+        showState("Fill the MCA and Umbilical artery PI first", "unsaved");
+        return;
+      }
+      var cell = rowCell("CPR");
+      var range = cell && textRange(cell, 0, cell.textContent.length);
+      if (!range) return;
+      ed.focus();
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand("insertText", false, (mca / ua).toFixed(2));
+      setDirty(true);
+      showState("CPR " + (mca / ua).toFixed(2) + " = MCA " + mca + " / UA " + ua + " - check, then Save", "unsaved");
+    });
+  }
+
   window.__editorDirty = function () { return dirty; };
   window.addEventListener("beforeunload", function (e) {
     if (dirty && !window.__skipUnloadWarning) { e.preventDefault(); e.returnValue = ""; }

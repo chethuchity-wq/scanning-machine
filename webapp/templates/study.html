@@ -87,6 +87,13 @@
           <h2>Measurements from scan</h2>
           {% if document %}<p class="hint">Click in the report where a value goes, then click the value to put it there.</p>{% endif %}
         </div>
+        {% if document and 'CPR' in document.html %}
+        <section class="scan-group">
+          <h3>Doppler</h3>
+          <p class="hint">Click the Umbilical artery / MCA row in the report, then the PI under the matching image.</p>
+          <button type="button" class="btn btn-light cpr-calc" title="CPR = MCA PI / umbilical artery PI">Calculate CPR</button>
+        </section>
+        {% endif %}
         {% if suggestions %}
         <section class="scan-group suggestions">
           <h3>Suggested from the scan</h3>
@@ -124,7 +131,7 @@
             <span class="img-no">Image {{ loop.index }}</span>
             {% if img['values'] %}
             <span class="chips">
-              {% for v in img['values'] %}<button type="button" class="value-chip" data-value="{{ v.value }}" title="{{ v.name }} - click to put in the report">{{ v.value }} {{ v.unit }}</button>{% endfor %}
+              {% for v in img['values'] %}<button type="button" class="value-chip{{ ' named' if v.name not in ('Dist', 'Dist1', 'Dist2', 'Dist3', 'Volume') }}" data-value="{{ v.value }}" title="{{ v.name }} - click to put in the report">{% if v.name not in ('Dist', 'Dist1', 'Dist2', 'Dist3', 'Volume') %}<span class="cn">{{ v.name }}</span> {% endif %}{{ v.value }} {{ v.unit }}</button>{% endfor %}
             </span>
             {% else %}<span class="hint">no values</span>{% endif %}
           </figcaption>
