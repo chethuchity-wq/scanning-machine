@@ -264,7 +264,14 @@ class OrthancClient:
 
         try:
             while True:
-                changes = self.get_changes(since=last_seq)
+                try:
+                    changes = self.get_changes(since=last_seq)
+                except requests.exceptions.RequestException as e:
+                    # Orthanc restarting or briefly unreachable: keep the
+                    # cursor and try again, instead of the whole watcher dying
+                    print(f"  [WAIT] Orthanc not reachable ({e.__class__.__name__}) - retrying")
+                    time.sleep(max(poll_interval, 5))
+                    continue
 
                 for change in changes["Changes"]:
                     if change["ChangeType"] == "StableStudy":

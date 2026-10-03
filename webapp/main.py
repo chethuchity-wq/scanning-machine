@@ -388,12 +388,22 @@ def worklist(request: Request, day: Optional[str] = None, user: dict = Depends(r
         prev_day=earlier[0] if earlier else None,
         next_day=later[-1] if later else None,
         latest_day=days[0] if days else None,
+        signature=db.day_signature(user["clinic_id"], key),
         counts={
             "draft": sum(s["document_status"] == "draft" for s in studies),
             "reviewed": sum(s["document_status"] == "reviewed" for s in studies),
             "flagged": sum(bool(s["needs_review"]) for s in studies),
         },
     )
+
+
+@app.get("/day-status")
+def day_status(day: str, user: dict = Depends(require_login)):
+    """Polled by the day page every few seconds: reload when this changes."""
+    shown = _parse_day(day)
+    if shown is None:
+        raise HTTPException(status_code=400, detail="Bad date")
+    return {"signature": db.day_signature(user["clinic_id"], shown.isoformat())}
 
 
 def _study_or_404(user: dict, study_id: int) -> dict:

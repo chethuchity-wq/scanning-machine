@@ -45,6 +45,21 @@
     });
   }
 
+  // Today's day page: check every 5 s for new reports and reload when one
+  // arrives (not on a timer, so nothing jumps while you read)
+  var live = document.querySelector("[data-live]");
+  if (live) {
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch("/day-status?day=" + live.dataset.live, { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.signature !== live.dataset.signature) window.location.reload();
+        })
+        .catch(function () {});
+    }, 5000);
+  }
+
   var ed = document.getElementById("editor");
   if (!ed) return;
 

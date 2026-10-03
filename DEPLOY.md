@@ -240,12 +240,22 @@ This creates the `.venv` virtual environment, installs dependencies, creates the
 
 ## Part E — Configure
 
+> **Speed.** Use `127.0.0.1`, not `localhost`: on Windows "localhost" tries
+> IPv6 first and Orthanc listens on IPv4 only, which costs 2 s on every new
+> connection. Also set `"StableAge" : 15` in Orthanc's `orthanc.json`
+> (`C:\Program Files\Orthanc Server\Configuration\`, needs an administrator,
+> then `Restart-Service Orthanc`): Orthanc waits that many seconds after the
+> last image before a scan counts as complete; the default 60 s is far more
+> than the Affiniti needs. With both, a report is ready about 30 s after the
+> scanner finishes sending.
+
 Open `C:\scanning-machine\config_local.py` in Notepad. Every line is commented out
 by default — uncomment and fill in only what differs from `config.py`.
 
 ```python
 # --- Orthanc ---
-ORTHANC_URL = "http://localhost:8042"     # or the Orthanc machine's LAN IP
+ORTHANC_URL = "http://127.0.0.1:8042"     # or the Orthanc machine's LAN IP
+POLL_INTERVAL_SECONDS = 3                 # check for new scans every 3 s
 ORTHANC_USERNAME = "orthanc"
 ORTHANC_PASSWORD = "the-password-you-set"
 

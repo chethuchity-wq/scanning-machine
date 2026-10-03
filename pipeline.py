@@ -34,6 +34,10 @@ Usage:
 import argparse
 import io
 import json
+import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 import re
 import sys
 from datetime import datetime
@@ -691,6 +695,31 @@ def extract_patient_info(ds: pydicom.Dataset) -> dict:
 # Pipeline modes
 # ---------------------------------------------------------------------------
 
+READ_WORKERS = min(4, os.cpu_count() or 1)
+
+
+def _read_instances(client: OrthancClient, instance_ids: list[str]) -> list:
+    """
+    Download each instance and read its measurements and image, several at a
+    time. Returns, in the same order, (dataset, measurements, png) or the
+    exception raised for that instance.
+    """
+    local = threading.local()
+
+    def read(instance_id):
+        try:
+            if not hasattr(local, "client"):
+                # One connection per worker: a requests session isn't thread-safe
+                local.client = OrthancClient(client.url)
+            ds = local.client.get_instance_as_dataset(instance_id)
+            return ds, process_dataset(ds, filename=instance_id), dicom_to_png_bytes(ds)
+        except Exception as e:
+            return e
+
+    with ThreadPoolExecutor(max_workers=READ_WORKERS) as pool:
+        return list(pool.map(read, instance_ids))
+
+
 def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str | None = None) -> Path:
     """
     Process a single study from Orthanc and generate its report. `scan_type`
@@ -722,47 +751,56 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
     # Every image with its own values, for the dashboard's scan panel
     scan_images: list[dict] = []
 
-    series_ids = client.list_series(study_id)
-    for series_id in series_ids:
+    instance_ids = []
+    for series_id in client.list_series(study_id):
         series_info = client.get_series(series_id)
         modality = series_info.get("MainDicomTags", {}).get("Modality", "")
         print(f"  Series [{modality}]: {series_info.get('MainDicomTags', {}).get('SeriesDescription', 'N/A')}")
+        instance_ids.extend(client.list_instances(series_id))
 
-        instance_ids = client.list_instances(series_id)
-        for instance_id in instance_ids:
-            try:
-                ds = client.get_instance_as_dataset(instance_id)
-                last_ds = ds
-                if image_ds is None and str(ds.get("Modality", "")).upper() == "US":
-                    image_ds = ds
+    # Instances are read in parallel - most of the time is reading values off
+    # the images (Tesseract), which runs as separate processes - then
+    # combined in their original order
+    for instance_id, result in zip(instance_ids, _read_instances(client, instance_ids)):
+        if isinstance(result, Exception):
+            print(f"    [ERROR] Instance {instance_id[:8]}: {result}")
+            continue
+        ds, measurements, png_bytes = result
+        last_ds = ds
+        if image_ds is None and str(ds.get("Modality", "")).upper() == "US":
+            image_ds = ds
 
-                # Get patient info from first dataset
-                if patient_info is None:
-                    patient_info = extract_patient_info(ds)
+        # Get patient info from first dataset
+        if patient_info is None:
+            patient_info = extract_patient_info(ds)
 
-                # Extract measurements
-                measurements = process_dataset(ds, filename=instance_id)
-                if measurements:
-                    print(f"    → {len(measurements)} measurement(s) from instance {instance_id[:8]}...")
-                    all_measurements.extend(measurements)
+        if measurements:
+            print(f"    -> {len(measurements)} measurement(s) from instance {instance_id[:8]}...")
+            all_measurements.extend(measurements)
 
-                # Collect scan images (skips SR - no pixel data); the first
-                # few also go at the end of the Word report
-                png_bytes = dicom_to_png_bytes(ds)
-                if png_bytes:
-                    if len(report_images) < config.MAX_REPORT_IMAGES:
-                        report_images.append(png_bytes)
-                    scan_images.append({
-                        "png": png_bytes,
-                        "order": (str(ds.get("ContentTime", "")), int(ds.get("InstanceNumber", 0) or 0)),
-                        "preset": str(ds.get("ProcessingFunction", "")),
-                        "values": measurements,
-                    })
-
-            except Exception as e:
-                print(f"    [ERROR] Instance {instance_id[:8]}: {e}")
+        # Collect scan images (skips SR - no pixel data); the first
+        # few also go at the end of the Word report
+        if png_bytes:
+            if len(report_images) < config.MAX_REPORT_IMAGES:
+                report_images.append(png_bytes)
+            scan_images.append({
+                "png": png_bytes,
+                "order": (str(ds.get("ContentTime", "")), int(ds.get("InstanceNumber", 0) or 0)),
+                "preset": str(ds.get("ProcessingFunction", "")),
+                "values": measurements,
+            })
 
     _save_scan_data(study_id, scan_images, all_measurements)
+
+    # Late images for a scan whose report the doctor already edited: the
+    # dashboard's image panel is updated (above), but a new report would
+    # replace the edited one - keep it. (A remake chosen in the dashboard
+    # passes scan_type and always goes ahead.)
+    edited = dashboard_db.edited_report_path(study_id) if not scan_type else None
+    if edited:
+        print(f"  [SKIP] Report already edited by the doctor - kept: {edited}")
+        print(f"{'='*60}\n")
+        return Path(edited)
 
     # Deduplicate across all instances
     all_measurements = _deduplicate_measurements(all_measurements)
@@ -972,15 +1010,21 @@ def watch_orthanc():
     """
     client = OrthancClient()
 
-    # Test connection first
-    try:
-        info = client.test_connection()
-        print(f"Connected to Orthanc {info.get('Version', '?')} at {config.ORTHANC_URL}")
-        print(f"DICOM AET: {info.get('DicomAet', '?')}")
-    except Exception as e:
-        print(f"ERROR: Cannot connect to Orthanc at {config.ORTHANC_URL}: {e}")
-        print("Check config.py ORTHANC_URL, ORTHANC_USERNAME, ORTHANC_PASSWORD")
-        sys.exit(1)
+    # Wait for Orthanc rather than exit: after a reboot or an Orthanc restart
+    # this process can start a few seconds before Orthanc accepts connections,
+    # and exiting left no pipeline running at all
+    waited = 0
+    while True:
+        try:
+            info = client.test_connection()
+            break
+        except Exception as e:
+            if waited % 60 == 0:
+                print(f"Waiting for Orthanc at {config.ORTHANC_URL} ({e.__class__.__name__}) ...")
+            time.sleep(5)
+            waited += 5
+    print(f"Connected to Orthanc {info.get('Version', '?')} at {config.ORTHANC_URL}")
+    print(f"DICOM AET: {info.get('DicomAet', '?')}")
 
     print(f"\nReport output directory: {config.OUTPUT_DIR}")
     print(f"Poll interval: {config.POLL_INTERVAL_SECONDS}s")

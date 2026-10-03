@@ -1,12 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Worklist {{ day.strftime("%d/%m/%Y") }}{% endblock %}
 {% block body_class %}app{% endblock %}
-{% block head %}{% if is_today %}<meta http-equiv="refresh" content="60">{% endif %}{% endblock %}
 {% block content %}
 <div class="app-grid">
   {% include "_sidebar.html" %}
   <section class="app-main">
-    <div class="day-bar">
+    <div class="day-bar" {% if is_today %}data-live="{{ day.isoformat() }}" data-signature="{{ signature }}"{% endif %}>
       {% if prev_day %}<a class="day-nav" href="/?day={{ prev_day }}" title="Previous day with scans">&#9664; Previous</a>{% else %}<span class="day-nav disabled">&#9664; Previous</span>{% endif %}
       <h1>{{ day.strftime("%A, %d/%m/%Y") }}{% if is_today %} <span class="today-tag">Today</span>{% endif %}</h1>
       {% if next_day %}<a class="day-nav" href="/?day={{ next_day }}" title="Next day with scans">Next &#9654;</a>{% else %}<span class="day-nav disabled">Next &#9654;</span>{% endif %}

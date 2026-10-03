@@ -295,6 +295,35 @@ def list_day_studies(clinic_id: int, study_date: str) -> list[dict]:
         return day
 
 
+def day_signature(clinic_id: int, study_date: str) -> str:
+    """Changes whenever a report is added for the day - for the page's live update."""
+    with SessionLocal() as session:
+        count, last_id = (
+            session.query(func.count(Report.id), func.max(Report.id))
+            .join(Study, Report.study_id == Study.id)
+            .filter(Study.clinic_id == clinic_id, Study.study_date == study_date)
+            .one()
+        )
+    return f"{count}-{last_id or 0}"
+
+
+def edited_report_path(orthanc_study_id: str) -> Optional[str]:
+    """
+    The Word report of this scan if the doctor has already edited it, else
+    None. The pipeline then doesn't make a new report when Orthanc reports the
+    scan complete again (late images), which would replace the edited one.
+    """
+    if not orthanc_study_id:
+        return None
+    with SessionLocal() as session:
+        study = session.query(Study).filter_by(orthanc_study_id=orthanc_study_id).first()
+        report = _primary_report(study) if study else None
+        if report is None or report.report_type != "docx":
+            return None
+        status = _document_status(report.report_type, report.file_path, report.generated_at)
+        return report.file_path if status == "reviewed" else None
+
+
 def get_study(clinic_id: int, study_id: int) -> Optional[dict]:
     """One scan with its record, numbered as on its day's list."""
     with SessionLocal() as session:
