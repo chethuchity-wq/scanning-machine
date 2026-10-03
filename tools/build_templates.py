@@ -36,9 +36,9 @@ MARGIN_SIDE = Cm(1.5)
 CONTENT_W = (21.0 - 2 * 1.5) / 2.54  # inches
 
 FONT = "Calibri"
-# Clinic's print sizes: body 13 pt; title, tables, notes and footer a step
-# up from Word's defaults
-BODY_PT, TABLE_PT, NOTE_PT = 13, 11.5, 10
+# Clinic's print sizes: 14 pt for the report text and tables, notes 11 pt;
+# title 15 pt, page-number line 9 pt
+BODY_PT, TABLE_PT, NOTE_PT = 14, 14, 11
 TITLE_PT, FOOTER_PT = 15, 9
 
 
@@ -193,7 +193,7 @@ def patient_box(doc: Document, sex: str, clinical: str, lmp: bool) -> None:
     Patient details. `clinical` is either a {{placeholder}} or the form's fixed
     clinical-data text.
     """
-    w = [1.3, 2.45, 1.15, CONTENT_W - 1.3 - 2.45 - 1.15]
+    w = [1.65, 2.3, 1.3, CONTENT_W - 1.65 - 2.3 - 1.3]
     table = doc.add_table(rows=4, cols=4)
     table.style = "Table Grid"
     table.autofit = False
@@ -297,9 +297,10 @@ def signature(doc: Document) -> None:
     p.add_run("{{doctor_qual}}")
 
 
-def pairs(doc: Document, rows: list[list[str]]) -> None:
+def pairs(doc: Document, rows: list[list[str]], label_w: float = 1.75) -> None:
     """Measurement table: Parameter | Value | Parameter | Value."""
-    w = [1.95, 1.43, 1.95, CONTENT_W - 1.95 - 1.43 - 1.95]
+    value_w = (CONTENT_W - 2 * label_w) / 2
+    w = [label_w, value_w, label_w, value_w]
     grid_table(doc, [["Parameter", "Value", "Parameter", "Value"]] + rows, w,
                header=True, label_cols=(0, 2), center_cols=(1, 3))
 
@@ -441,14 +442,14 @@ def anomaly_scan() -> Document:
         ["HL", "{{hl}} cm", "UL", "{{ul}} cm"],
         ["RL", "{{rl}} cm", "TL", "{{tl}} cm"],
         ["FIB", "{{fib}} cm", "Foot length", "{{foot_length}} cm"],
-        ["EFW", "{{efw}} g +/- {{efw_error}} g", "FL / AC", "{{fl_ac_ratio}} %"],
+        ["EFW", "{{efw}} g ± {{efw_error}} g", "FL / AC", "{{fl_ac_ratio}} %"],
     ])
     heading(doc, "Other measurements")
     pairs(doc, [
         ["Nasal bone length", "{{nasal_bone_length}} mm", "Nuchal fold thickness", "{{nuchal_fold}} mm"],
         ["Trans cerebellar diameter", "{{tcd}} cm", "Cisterna magna", "{{cisterna_magna}} cm"],
         ["Lateral ventricular atrium", "{{lvta}} cm", "", ""],
-    ])
+    ], label_w=2.45)
     heading(doc, "Foetal anatomy")
     findings(doc, [
         ("Foetal head", ["Foetal calvaria appears normal.",
@@ -537,7 +538,7 @@ def growth_scan() -> Document:
     pairs(doc, [
         ["BPD", "{{bpd}} cm", "HC", "{{hc}} cm"],
         ["AC", "{{ac}} cm", "FL", "{{fl}} cm"],
-        ["EFW", "{{efw}} g +/- {{efw_error}} g", "Foetal heart rate", "{{fhr}} BPM"],
+        ["EFW", "{{efw}} g ± {{efw_error}} g", "Foetal heart rate", "{{fhr}} BPM"],
         ["AFI", "{{afi}} cm", "", ""],
     ])
     heading(doc, "Findings")
