@@ -374,6 +374,44 @@ def _convert_to_field_unit(value, source_unit: str, field: str) -> str | None:
     return f"{converted:.2f}".rstrip("0").rstrip(".")
 
 
+# Organs the scanner measures in several dimensions, and their report field
+_COMPOSITE_ORGANS = [
+    (re.compile(r"^(right|rt)\.?\s+ovary\b"), "right_ovary_size"),
+    (re.compile(r"^(left|lt)\.?\s+ovary\b"), "left_ovary_size"),
+    (re.compile(r"^(right|rt)\.?\s+kidney\b"), "right_kidney_size"),
+    (re.compile(r"^(left|lt)\.?\s+kidney\b"), "left_kidney_size"),
+    (re.compile(r"^uterus\b"), "uterus_size"),
+    (re.compile(r"^prostate\b"), "prostate_size"),
+]
+_DIMENSION_ORDER = ["length", "width", "height", "depth", "ap"]
+_DIMENSION_RE = re.compile(r"\b(length|width|height|depth|ap)$")
+
+
+def _composite_sizes(measurements: list[dict]) -> dict:
+    """
+    {"uterus_size": "6.63 x 3.17 x 3.96", ...} from an organ's labelled
+    Length / Width / Height, in cm, in that order. The scanner's chosen
+    reading of each dimension has already been picked by deduplication.
+    """
+    dims: dict[str, dict[str, float]] = {}
+    for m in measurements:
+        name = str(m.get("measurement_name", "")).lower().strip()
+        dim = _DIMENSION_RE.search(name)
+        field = next((f for pattern, f in _COMPOSITE_ORGANS if pattern.search(name)), None)
+        if not dim or not field:
+            continue
+        unit = str(m.get("unit", "")).lower()
+        try:
+            cm = float(m.get("value")) / {"mm": 10, "cm": 1}[unit]
+        except (KeyError, TypeError, ValueError):
+            continue
+        dims.setdefault(field, {}).setdefault(dim.group(1), cm)
+    return {
+        field: " x ".join(f"{d[k]:.2f}".rstrip("0").rstrip(".") for k in _DIMENSION_ORDER if k in d)
+        for field, d in dims.items()
+    }
+
+
 def _build_docx_data(
     patient_info: dict,
     measurements: list[dict],
@@ -405,6 +443,9 @@ def _build_docx_data(
         "_images": images or [],
     }
     warnings: list[str] = []
+    # "Uterus Length/Width/Height" -> one "L x W x H" size; set first, so the
+    # single-name mapping below doesn't put just one dimension in the blank
+    data.update(_composite_sizes(measurements))
 
     for m in measurements:
         name = str(m.get("measurement_name", ""))
@@ -544,7 +585,7 @@ def _compute_review_flags(
 
 
 SCAN_DATA_DIR = Path(config.OUTPUT_DIR) / "scan_data"
-_NON_CLINICAL_RE = re.compile(r"(id|name|sex|date|exam)", re.I)
+_NON_CLINICAL_RE = re.compile(r"\b(id|name|sex|date|exam)\b", re.I)
 
 
 def scan_data_dir(orthanc_study_id: str) -> Path:

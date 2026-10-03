@@ -340,6 +340,82 @@
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Suggested values (measurement_rules.py): each goes into its row's blank -
+  // the row is found by its label ("Liver:"), the blank by the unit after it
+  // ("____ cm" for a size, "____ mm" for the endometrium).
+  // ---------------------------------------------------------------------------
+  function rowCell(label) {
+    var want = label.toLowerCase();
+    var rows = ed.querySelectorAll("tr");
+    for (var i = 0; i < rows.length; i++) {
+      var cells = rows[i].cells;
+      if (cells.length > 1 && cells[0].textContent.trim().replace(/:$/, "").toLowerCase() === want) {
+        return cells[1];
+      }
+    }
+    return null;
+  }
+
+  // Range over characters [start, end) of an element's text
+  function textRange(el, start, end) {
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    var range = document.createRange(), pos = 0, node, began = false;
+    while ((node = walker.nextNode())) {
+      var len = node.textContent.length;
+      if (!began && start <= pos + len) { range.setStart(node, start - pos); began = true; }
+      if (began && end <= pos + len) { range.setEnd(node, end - pos); return range; }
+      pos += len;
+    }
+    return null;
+  }
+
+  function fillSuggestion(li) {
+    var cell = rowCell(li.dataset.label);
+    var unit = (li.querySelector(".vv").textContent.trim().split(" ").pop() || "").toLowerCase();
+    if (!cell) return false;
+    var paras = cell.querySelectorAll("p");
+    for (var i = 0; i < paras.length; i++) {
+      var m = new RegExp("_{2,}(?=\\s*" + unit + "\\b)").exec(paras[i].textContent);
+      if (!m) continue;
+      var range = textRange(paras[i], m.index, m.index + m[0].length);
+      if (!range) continue;
+      ed.focus();
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand("insertText", false, li.dataset.value);
+      li.classList.add("done");
+      setDirty(true);
+      return true;
+    }
+    return false;
+  }
+
+  document.querySelectorAll(".suggestion").forEach(function (li) {
+    li.querySelector(".sg-fill").addEventListener("click", function () {
+      if (!fillSuggestion(li)) showState("No empty " + li.dataset.label + " blank left for this value", "unsaved");
+    });
+    li.querySelector(".sg-show").addEventListener("click", function () {
+      var fig = document.querySelector('.scan-image[data-file="' + li.dataset.image + '"]');
+      if (!fig) return;
+      fig.scrollIntoView({ behavior: "smooth", block: "center" });
+      fig.classList.remove("flash");
+      void fig.offsetWidth;
+      fig.classList.add("flash");
+    });
+  });
+  var fillAll = document.querySelector(".sg-fill-all");
+  if (fillAll) {
+    fillAll.addEventListener("click", function () {
+      var filled = 0;
+      document.querySelectorAll(".suggestion:not(.done)").forEach(function (li) {
+        if (fillSuggestion(li)) filled += 1;
+      });
+      showState(filled + " value" + (filled === 1 ? "" : "s") + " filled - check them, then Save", "unsaved");
+    });
+  }
+
   window.__editorDirty = function () { return dirty; };
   window.addEventListener("beforeunload", function (e) {
     if (dirty && !window.__skipUnloadWarning) { e.preventDefault(); e.returnValue = ""; }

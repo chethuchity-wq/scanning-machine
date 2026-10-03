@@ -158,6 +158,14 @@ Each scan gets one report: the Word report (see below). In the dashboard:
   scanner's labelled report values: click in the report, then click a value
   to put it there - into a `____` blank if the caret is on one. Values the
   scan didn't provide print as `____` so they can't be missed.
+  For abdomen-pelvis and follicular reports measured with the plain distance
+  calliper (values with no organ name), `measurement_rules.py` **suggests**
+  which blank each value belongs to - from the order of the images, how the
+  values are grouped on each image and their sizes (e.g. a 9.70 x 4.34 cm pair
+  is a kidney; the one measured with the spleen is the left). No AI. The doctor
+  checks each against its image and fills it (Fill / Fill all blanks); nothing
+  is filled without a click, since size alone can confuse e.g. a gall bladder
+  with a kidney.
 - **Search** — name or patient ID (any part), date range, scan type, status.
 
 A PDF is made only when the PDF button is clicked: Microsoft Word converts the

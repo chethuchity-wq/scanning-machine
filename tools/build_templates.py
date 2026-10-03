@@ -589,7 +589,9 @@ def follicular_study() -> Document:
     heading(doc, "Follicular monitoring")
     w = [0.8, 1.45, 1.6, 1.6, CONTENT_W - 0.8 - 1.45 - 1.6 - 1.6]
     grid_table(doc, [["Day", "Endometrial thickness (mm)", "Follicles - right ovary",
-                      "Follicles - left ovary", "Free fluid"]] + [[""] * 5 for _ in range(10)],
+                      "Follicles - left ovary", "Free fluid"]]
+               # First row: this scan (endometrium from the scanner); the rest for follow-up visits
+               + [["", "{{endometrium_mm}}", "", "", ""]] + [[""] * 5 for _ in range(9)],
                w, header=True, label_cols=(), center_cols=(0, 1, 2, 3, 4))
     impression(doc, [])
     note(doc, [STANDARD_NOTE], label="Note: ")

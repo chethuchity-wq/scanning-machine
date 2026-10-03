@@ -87,6 +87,24 @@
           <h2>Measurements from scan</h2>
           {% if document %}<p class="hint">Click in the report where a value goes, then click the value to put it there.</p>{% endif %}
         </div>
+        {% if suggestions %}
+        <section class="scan-group suggestions">
+          <h3>Suggested from the scan</h3>
+          <p class="hint">Worked out from the order and sizes of the measurements - check each against its image before filling.</p>
+          <ul class="values">
+            {% for sg in suggestions %}
+            <li class="suggestion" data-label="{{ sg.label }}" data-blank="{{ sg.blank }}" data-value="{{ sg.value }}" data-image="{{ sg.image }}">
+              <button type="button" class="sg-show" title="{{ sg.why }} - show the image">
+                <span class="vn">{{ sg.label }}{% if sg.field == 'endometrium_mm' %} (endometrium){% endif %}</span>
+                <span class="vv">{{ sg.value }} {{ sg.unit }}</span>
+              </button>
+              <button type="button" class="btn sg-fill" title="Put this value in the {{ sg.label }} blank">Fill</button>
+            </li>
+            {% endfor %}
+          </ul>
+          <button type="button" class="btn btn-light sg-fill-all">Fill all blanks</button>
+        </section>
+        {% endif %}
         {% if scan.report_values %}
         <section class="scan-group">
           <h3>Scanner report</h3>
@@ -98,7 +116,7 @@
         </section>
         {% endif %}
         {% for img in scan.images %}
-        <figure class="scan-image">
+        <figure class="scan-image" data-file="{{ img.file }}">
           <a href="/study/{{ study.study_id }}/scan/{{ img.file }}" target="_blank" title="Open full size">
             <img src="/study/{{ study.study_id }}/scan/{{ img.file }}" alt="Scan image {{ loop.index }}" loading="lazy">
           </a>

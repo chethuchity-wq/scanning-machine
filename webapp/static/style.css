@@ -458,6 +458,31 @@ a.patient:hover { color: var(--blue); text-decoration: underline; }
 .scan-group .value-chip { display: flex; justify-content: space-between; width: 100%; margin-bottom: 4px; }
 .scan-group .vn { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
 .scan-group .vv { font-weight: 600; white-space: nowrap; }
+.suggestions .hint { margin: 0 0 6px; }
+.suggestion { display: flex; gap: 4px; margin-bottom: 4px; }
+.suggestion .sg-show {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  text-align: left;
+  padding: 4px 8px;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.suggestion .sg-show:hover { border-color: var(--blue); }
+.suggestion .sg-show .vn { font-size: 0.85em; margin: 0; }
+.suggestion .sg-fill { padding: 3px 10px; cursor: pointer; font-size: 0.82em; align-self: center; }
+.suggestion.done .sg-show { background: #dcfce7; border-color: #bbe5c8; }
+.suggestion.done .sg-fill { background: #9db8c9; border-color: #9db8c9; }
+.sg-fill-all { width: 100%; margin-top: 4px; cursor: pointer; }
+.scan-image.flash img { animation: flash 1.2s ease-out; }
+@keyframes flash { 0%, 40% { outline: 4px solid #f59e0b; outline-offset: -4px; } 100% { outline: 0 solid transparent; } }
 .scan-image { margin: 12px 0 0; }
 .scan-image img { display: block; width: 100%; border-radius: 4px; background: #000; }
 .scan-image figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; font-size: 0.82em; }

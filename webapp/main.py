@@ -25,6 +25,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import config
 import docx_pdf
+import measurement_rules
 from webapp import db, docx_editor
 from webapp.auth import hash_password, verify_password
 
@@ -416,6 +417,7 @@ def study_page(
     document = None
     if study["report_type"] == "docx" and Path(study["file_path"]).exists():
         document = docx_editor.render(study["file_path"])
+    scan = _scan_data(study)
     siblings = db.list_day_studies(user["clinic_id"], study["study_date"])
     ids = [s["study_id"] for s in siblings]
     i = ids.index(study_id) if study_id in ids else -1
@@ -423,7 +425,10 @@ def study_page(
         request, user, "study.html", day,
         study=study,
         document=document,
-        scan=_scan_data(study),
+        scan=scan,
+        # Guesses only when the scanner sent no labelled values to fill from
+        suggestions=measurement_rules.suggest(scan["images"], study["scan_type"])
+        if scan and document and not scan.get("report_values") else [],
         prev_study=ids[i - 1] if i > 0 else None,
         next_study=ids[i + 1] if 0 <= i < len(ids) - 1 else None,
         day_total=len(ids),
