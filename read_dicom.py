@@ -65,7 +65,7 @@ def process_file(dcm_path: Path) -> list[dict]:
         print(f"  [SKIP] Cannot read {dcm_path.name}: {e}")
         return []
 
-    modality = str(ds.get((0x0008, 0x0060), "")).strip().upper()
+    modality = str(ds.get("Modality", "")).strip().upper()
 
     info = read_patient_info(ds)
     info["file"] = dcm_path.name

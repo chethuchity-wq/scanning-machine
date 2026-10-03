@@ -78,7 +78,7 @@ def process_dataset(ds: pydicom.Dataset, filename: str = "") -> list[dict]:
     Returns:
         List of measurement dicts with: measurement_name, value, unit, context
     """
-    modality = str(ds.get((0x0008, 0x0060), "")).strip().upper()
+    modality = str(ds.get("Modality", "")).strip().upper()
     measurements = []
 
     # --- Strategy 1: Structured Report (best quality data) ---
@@ -122,7 +122,15 @@ def _deduplicate_measurements(measurements: list[dict]) -> list[dict]:
         key = (name.lower().strip(), m.get("unit", "").lower())
         current_priority = priority.get(m.get("context", ""), 0)
 
-        if key not in seen or current_priority > priority.get(seen[key].get("context", ""), 0):
+        if key not in seen:
+            seen[key] = m
+            continue
+        seen_priority = priority.get(seen[key].get("context", ""), 0)
+        # Same source: the reading the scanner marked as chosen beats the others
+        if current_priority > seen_priority or (
+            current_priority == seen_priority
+            and m.get("selected") and not seen[key].get("selected")
+        ):
             seen[key] = m
 
     return list(seen.values())
@@ -280,6 +288,36 @@ _COMPILED_FIELD_MAP: list[tuple[object, str]] = [
 ]
 
 
+# Obstetric dating values, matched on the exact SR concept name (Philips OB
+# SR / DICOM TID 5000). Gestational ages fill a "weeks"/"days" field pair under
+# each prefix - early pregnancy prints ga_scan_*, NT/growth print aua_*.
+_GA_FIELD_PREFIXES: dict[str, tuple[str, ...]] = {
+    "composite ultrasound age": ("ga_scan", "aua"),
+    "gestational age by lmp": ("ga_lmp",),
+}
+_DATE_FIELDS: dict[str, str] = {
+    "lmp": "lmp",
+    "edd from lmp": "edd_lmp",
+    "edd from average ultrasound age": "edd_scan",
+}
+_GA_UNIT_DAYS: dict[str, int] = {
+    "d": 1, "day": 1, "days": 1,
+    "wk": 7, "wks": 7, "week": 7, "weeks": 7,
+}
+
+
+def _ga_weeks_days(value, unit: str) -> tuple[str, str] | None:
+    """Split a gestational age into (weeks, days), or None if the unit is unknown."""
+    per_unit = _GA_UNIT_DAYS.get(str(unit or "").strip().lower())
+    try:
+        total_days = round(float(value) * per_unit) if per_unit else None
+    except (TypeError, ValueError):
+        return None
+    if total_days is None or total_days < 0:
+        return None
+    return str(total_days // 7), str(total_days % 7)
+
+
 def _measurement_to_field(name: str) -> str | None:
     """Return the fill_report data key for a measurement name, or None."""
     norm = name.lower().strip()
@@ -359,6 +397,22 @@ def _build_docx_data(
 
     for m in measurements:
         name = str(m.get("measurement_name", ""))
+        norm = name.lower().strip()
+
+        if norm in _GA_FIELD_PREFIXES:
+            weeks_days = _ga_weeks_days(m.get("value"), m.get("unit", ""))
+            if weeks_days is None:
+                warnings.append(f"{name} ({m.get('value')} {m.get('unit') or 'no unit'}) -> weeks/days")
+                continue
+            for prefix in _GA_FIELD_PREFIXES[norm]:
+                data.setdefault(f"{prefix}_weeks", weeks_days[0])
+                data.setdefault(f"{prefix}_days", weeks_days[1])
+            continue
+        if norm in _DATE_FIELDS:
+            if m.get("unit") == "date":
+                data.setdefault(_DATE_FIELDS[norm], m.get("value"))
+            continue
+
         field = _measurement_to_field(name)
         if not field or field in data:
             continue

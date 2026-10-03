@@ -94,7 +94,7 @@ FINGERPRINT_RULES: list[tuple[str, list[str], list[str]]] = [
         "crl", "nasal bone", "ductus venosus",
     ]),
     ("early_pregnancy", ["crl", "crown rump length"], [
-        "gestational sac", "cardiac activity",
+        "gestational sac", "cardiac activity", "fetal heart rate", "yolk sac",
     ]),
     ("anomaly_scan", ["nuchal fold", "nasal bone length", "tcd", "cisterna magna",
                       "lateral ventricular atrium"], [
@@ -147,27 +147,45 @@ def _match_keywords(text: str) -> Optional[tuple[str, float]]:
     return None
 
 
+# Derived values (percentiles, z-scores, ratios) name the statistic, not a
+# measurement taken - "Growth Percentile Rank" is not evidence of anything.
+_DERIVED_NAME_RE = re.compile(r"\b(ratio|percentile|centile|z[- ]?score|rank)\b")
+
+
+def _keyword_pattern(keyword: str) -> re.Pattern:
+    """
+    Match a fingerprint keyword at a word start. Short abbreviations must also
+    end on a word boundary: plain substring matching let "nt" hit inside
+    "Growth Percentile Rank" and classify an 8-week early pregnancy as an NT
+    scan. Longer keywords stay prefix matches so "follicle" still finds
+    "Follicles".
+    """
+    tail = r"\b" if len(keyword) <= 3 else ""
+    return re.compile(r"\b" + re.escape(keyword) + tail)
+
+
 def _fingerprint_measurements(measurement_names: list[str]) -> Optional[tuple[str, float]]:
     """
     Score each scan type based on which measurement labels are present.
     Returns (best_scan_type, confidence) or None if no clear winner.
     """
-    norm_names = [_normalise(n) for n in measurement_names]
+    norm_names = [
+        n for n in (_normalise(n) for n in measurement_names)
+        if not _DERIVED_NAME_RE.search(n)
+    ]
+
+    def present(keyword: str) -> bool:
+        pattern = _keyword_pattern(keyword)
+        return any(pattern.search(name) for name in norm_names)
 
     scores: dict[str, float] = {}
     for scan_type, required, bonus in FINGERPRINT_RULES:
         # Must match at least one required keyword
-        required_hits = sum(
-            1 for req in required
-            if any(req in name for name in norm_names)
-        )
+        required_hits = sum(1 for req in required if present(req))
         if required_hits == 0:
             continue
 
-        bonus_hits = sum(
-            1 for b in bonus
-            if any(b in name for name in norm_names)
-        )
+        bonus_hits = sum(1 for b in bonus if present(b))
         score = required_hits * 2 + bonus_hits
         scores[scan_type] = max(scores.get(scan_type, 0), score)
 
@@ -339,7 +357,7 @@ def classify_scan(
         # Try to extract measurements now so we can fingerprint them
         try:
             from extract_measurements import extract_from_sr, extract_from_image
-            modality = str(ds.get((0x0008, 0x0060), "")).strip().upper()
+            modality = str(ds.get("Modality", "")).strip().upper()
             measurements = extract_from_sr(ds) if modality == "SR" else extract_from_image(ds)
         except Exception:
             measurements = []

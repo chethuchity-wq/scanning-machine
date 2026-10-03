@@ -16,6 +16,21 @@ def _get_code_meaning(sequence) -> str:
     return "Unknown"
 
 
+def _is_selected_value(item) -> bool:
+    """
+    True if the scanner marked this NUM as the value to report.
+
+    When a measurement is repeated, scanners send every reading plus a
+    "Selection Status" modifier on the one the sonographer kept (e.g. "Most
+    recent value chosen", "Mean value chosen"). Without this, the first
+    reading in the file wins - which can be the one that was replaced.
+    """
+    for child in item.get("ContentSequence", None) or []:
+        if _get_code_meaning(child.get("ConceptNameCodeSequence", None)) == "Selection Status":
+            return True
+    return False
+
+
 def _walk_content_sequence(sequence, measurements: list, parent_label: str = "") -> None:
     """
     Recursively walk the SR ContentSequence tree.
@@ -43,6 +58,7 @@ def _walk_content_sequence(sequence, measurements: list, parent_label: str = "")
                         "value": float(str(numeric_value)),
                         "unit": units,
                         "context": parent_label if parent_label != label else "",
+                        "selected": _is_selected_value(item),
                     })
 
         elif value_type == "CONTAINER":
@@ -50,6 +66,17 @@ def _walk_content_sequence(sequence, measurements: list, parent_label: str = "")
             child_seq = item.get("ContentSequence", None)
             if child_seq:
                 _walk_content_sequence(child_seq, measurements, parent_label=label)
+
+        elif value_type == "DATE":
+            # Obstetric SRs carry LMP and EDD as DATE items (YYYYMMDD)
+            raw_date = str(item.get("Date", "")).strip()
+            if len(raw_date) == 8 and raw_date.isdigit():
+                measurements.append({
+                    "measurement_name": label,
+                    "value": f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}",
+                    "unit": "date",
+                    "context": parent_label,
+                })
 
         elif value_type == "TEXT":
             # Some systems store findings as free text — capture them too
