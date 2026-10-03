@@ -137,15 +137,18 @@ dashboard refuses every connection that doesn't come from the PC itself. Every r
 
 ## Output
 
-When a Word report is generated (see below), its PDF is Microsoft Word's own
-conversion of it (`docx_pdf.py`), saved next to it in `reports/filled/` with the
-same name, so the two always print the same. Downloading the PDF from the
-dashboard re-makes it whenever the Word report has been edited since. This needs
-Microsoft Word installed on the PC; if Word fails, the pipeline logs it and the
-PDF is made on download instead.
+Each scan gets one report: the Word report (see below), shown as one row in the
+dashboard worklist. The worklist shows one study date per page (today by
+default, with previous/next day buttons and a date picker) and numbers the
+day's scans 1, 2, 3... in the order they arrived.
+
+A PDF is made only when the PDF button is clicked: Microsoft Word converts the
+Word report (`docx_pdf.py`), saving it next to it in `reports/filled/`, and
+converts it again whenever the Word report has been edited since, so the two
+always print the same. This needs Microsoft Word installed on the PC.
 
 Only when no Word report can be made (scan type not identified) is a
-measurements-only summary PDF built, saved to `reports/`. It includes:
+measurements-only summary PDF built instead, saved to `reports/`. It includes:
 
 - Patient demographics
 - Measurements table with values, units, and normal ranges

@@ -232,32 +232,54 @@ def record_report(
         session.commit()
 
 
-def list_recent_reports(clinic_id: int, limit: int = 200) -> list[dict]:
+def study_dates(clinic_id: int) -> list[str]:
+    """Distinct study dates (YYYY-MM-DD) that have reports, newest first."""
     with SessionLocal() as session:
         rows = (
-            session.query(Report, Study)
-            .join(Study, Report.study_id == Study.id)
-            .filter(Report.clinic_id == clinic_id)
-            .order_by(Report.generated_at.desc())
-            .limit(limit)
+            session.query(Study.study_date)
+            .join(Report, Report.study_id == Study.id)
+            .filter(Study.clinic_id == clinic_id)
+            .distinct()
             .all()
         )
-        return [
-            {
+    return sorted((d for (d,) in rows if d), reverse=True)
+
+
+def list_day_studies(clinic_id: int, study_date: str) -> list[dict]:
+    """
+    One entry per scan on `study_date`, numbered 1, 2, 3... in the order the
+    scans arrived. The Word report is the scan's record; a study without one
+    (scan type not identified) shows its measurements-only PDF instead.
+    Older studies may also have a PDF row from when every Word report got
+    one - it is ignored. A study processed twice shows its latest report.
+    """
+    with SessionLocal() as session:
+        studies = (
+            session.query(Study)
+            .filter(Study.clinic_id == clinic_id, Study.study_date == study_date)
+            .order_by(Study.created_at, Study.id)
+            .all()
+        )
+        day = []
+        for study in studies:
+            reports = sorted(study.reports, key=lambda r: r.generated_at)
+            if not reports:
+                continue
+            word = [r for r in reports if r.report_type == "docx"]
+            report = (word or reports)[-1]
+            day.append({
+                "number": len(day) + 1,
                 "report_id": report.id,
-                "patient_name": study.patient_name,
+                "patient_name": " ".join(study.patient_name.replace("^", " ").split()),
                 "patient_id": study.patient_id,
-                "study_date": study.study_date,
                 "report_type": report.report_type,
                 "scan_type": report.scan_type,
-                "file_path": report.file_path,
                 "generated_at": report.generated_at,
                 "needs_review": report.needs_review,
                 "review_reason": report.review_reason,
                 "document_status": _document_status(report.report_type, report.file_path, report.generated_at),
-            }
-            for report, study in rows
-        ]
+            })
+        return day
 
 
 def _document_status(report_type: str, file_path: str, generated_at: datetime) -> str:

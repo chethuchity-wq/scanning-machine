@@ -44,7 +44,7 @@ body {
 .who { opacity: 0.85; font-size: 0.9em; }
 
 main {
-  max-width: 960px;
+  max-width: 1080px;
   margin: 32px auto;
   padding: 0 20px;
 }
@@ -174,3 +174,72 @@ code {
   padding: 1px 5px;
   border-radius: 3px;
 }
+
+/* Worklist: one study date per page */
+.day-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.day-bar h1 { margin: 0; font-size: 1.35em; }
+
+.day-nav {
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--blue);
+  text-decoration: none;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.day-nav:hover { border-color: var(--blue); }
+.day-nav.disabled { color: #b8c0c8; }
+
+.day-pick input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.9em;
+}
+
+.today-tag {
+  padding: 2px 8px;
+  background: var(--blue);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 0.55em;
+  vertical-align: middle;
+}
+
+.day-summary { color: var(--muted); margin: 10px 0 14px; }
+.day-summary strong { color: var(--text); }
+.warn-text { color: var(--warn); font-weight: 600; }
+
+table.worklist th.num,
+table.worklist td.num { width: 44px; text-align: center; color: var(--muted); }
+
+.patient { font-weight: 600; }
+.reason { margin-top: 3px; color: var(--warn); font-size: 0.85em; }
+
+td.actions { white-space: nowrap; }
+
+.btn {
+  display: inline-block;
+  padding: 4px 12px;
+  background: var(--blue);
+  color: #fff;
+  border: 1px solid var(--blue);
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 0.88em;
+}
+
+.btn:hover { background: var(--blue-dark); }
+.btn-light { background: #fff; color: var(--blue); }
+.btn-light:hover { background: #eef3f7; }

@@ -1,51 +1,73 @@
 {% extends "base.html" %}
-{% block title %}Worklist{% endblock %}
+{% block title %}Worklist {{ day.strftime("%d/%m/%Y") }}{% endblock %}
+{% block head %}{% if is_today %}<meta http-equiv="refresh" content="60">{% endif %}{% endblock %}
 {% block content %}
-<h1>Reports</h1>
-{% set flagged = reports|selectattr("needs_review")|list %}
-{% if flagged %}
-<p class="review-banner">⚠ {{ flagged|length }} report{{ "s" if flagged|length != 1 else "" }} flagged for review</p>
-{% endif %}
-{% if not reports %}
-<p class="empty">No reports generated yet. They'll appear here automatically once the pipeline processes a scan.</p>
-{% else %}
+<div class="day-bar">
+  {% if prev_day %}<a class="day-nav" href="/?day={{ prev_day }}" title="Previous day with scans">&#9664; Previous</a>{% else %}<span class="day-nav disabled">&#9664; Previous</span>{% endif %}
+  <h1>{{ day.strftime("%A, %d/%m/%Y") }}{% if is_today %} <span class="today-tag">Today</span>{% endif %}</h1>
+  {% if next_day %}<a class="day-nav" href="/?day={{ next_day }}" title="Next day with scans">Next &#9654;</a>{% else %}<span class="day-nav disabled">Next &#9654;</span>{% endif %}
+  <span class="spacer"></span>
+  <form method="get" action="/" class="day-pick">
+    <input type="date" name="day" value="{{ day.isoformat() }}" onchange="this.form.submit()" aria-label="Go to date">
+  </form>
+  {% if not is_today %}<a class="day-nav" href="/">Today</a>{% endif %}
+</div>
+
+{% if studies %}
+<p class="day-summary">
+  <strong>{{ studies|length }}</strong> scan{{ "s" if studies|length != 1 else "" }}
+  &middot; {{ counts.draft }} awaiting doctor
+  &middot; {{ counts.reviewed }} reviewed
+  {% if counts.flagged %}&middot; <span class="warn-text">&#9888; {{ counts.flagged }} need{{ "s" if counts.flagged == 1 else "" }} checking</span>{% endif %}
+</p>
 <table class="worklist">
   <thead>
     <tr>
-      <th></th>
+      <th class="num">No.</th>
       <th>Patient</th>
       <th>Patient ID</th>
-      <th>Study Date</th>
-      <th>Scan Type</th>
-      <th>Type</th>
+      <th>Scan</th>
       <th>Status</th>
-      <th>Generated</th>
-      <th></th>
+      <th>Time</th>
+      <th>Report</th>
     </tr>
   </thead>
   <tbody>
-    {% for r in reports %}
-    <tr class="{{ 'needs-review' if r.needs_review else '' }}">
-      <td>{% if r.needs_review %}<span class="review-badge" title="{{ r.review_reason }}">⚠ Review</span>{% endif %}</td>
-      <td>{{ r.patient_name }}</td>
-      <td>{{ r.patient_id }}</td>
-      <td>{{ r.study_date }}</td>
-      <td>{{ r.scan_type or "-" }}</td>
-      <td>{{ r.report_type|upper }}</td>
+    {% for s in studies %}
+    <tr class="{{ 'needs-review' if s.needs_review else '' }}">
+      <td class="num">{{ s.number }}</td>
       <td>
-        {% if r.document_status == "measurements" %}
-          <span class="status-badge status-measurements" title="Auto-generated measurements only — not the doctor-signed report">Measurements only</span>
-        {% elif r.document_status == "reviewed" %}
-          <span class="status-badge status-reviewed" title="Edited and saved since it was generated">✓ Reviewed</span>
+        <div class="patient">{{ s.patient_name }}</div>
+        {% if s.needs_review %}<div class="reason">&#9888; {{ s.review_reason }}</div>{% endif %}
+      </td>
+      <td>{{ s.patient_id }}</td>
+      <td>{{ s.scan_name }}</td>
+      <td>
+        {% if s.document_status == "measurements" %}
+          <span class="status-badge status-measurements" title="Scan type not identified - no Word report, only the measurements summary">Measurements only</span>
+        {% elif s.document_status == "reviewed" %}
+          <span class="status-badge status-reviewed" title="Edited and saved since it was generated">&#10003; Reviewed</span>
         {% else %}
-          <span class="status-badge status-draft" title="Not yet opened/saved by the doctor">Draft — awaiting doctor</span>
+          <span class="status-badge status-draft" title="Not yet opened/saved by the doctor">Awaiting doctor</span>
         {% endif %}
       </td>
-      <td>{{ r.generated_at.strftime("%Y-%m-%d %H:%M") }}</td>
-      <td><a href="/reports/{{ r.report_id }}/download">Download</a></td>
+      <td>{{ s.time }}</td>
+      <td class="actions">
+        {% if s.report_type == "docx" %}
+          <a class="btn" href="/reports/{{ s.report_id }}/download">Word</a>
+          <a class="btn btn-light" href="/reports/{{ s.report_id }}/pdf" target="_blank" title="Made from the Word report when clicked - may take a few seconds">PDF</a>
+        {% else %}
+          <a class="btn btn-light" href="/reports/{{ s.report_id }}/pdf" target="_blank">Measurements PDF</a>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+{% else %}
+<p class="empty">
+  No scans on this day.
+  {% if latest_day and latest_day != day.isoformat() %}<a href="/?day={{ latest_day }}">Go to the latest day with scans</a>.{% endif %}
+</p>
 {% endif %}
 {% endblock %}

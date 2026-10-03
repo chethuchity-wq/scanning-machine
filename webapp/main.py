@@ -11,6 +11,7 @@ Run: uvicorn webapp.main:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import secrets
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -283,32 +284,88 @@ def logout(request: Request):
 # Worklist
 # ---------------------------------------------------------------------------
 
+SCAN_TYPE_NAMES = {
+    "early_pregnancy": "Early pregnancy",
+    "nt_scan": "NT scan",
+    "anomaly_scan": "Anomaly scan",
+    "growth_scan": "Growth scan",
+    "follicular_study": "Follicular study",
+    "abdomen_pelvis_female": "Abdomen & pelvis (F)",
+    "abdomen_pelvis_male": "Abdomen & pelvis (M)",
+}
+
+
+def _local_time(utc: datetime) -> str:
+    """generated_at is stored in UTC; show the clinic PC's local time."""
+    return utc.replace(tzinfo=timezone.utc).astimezone().strftime("%H:%M")
+
+
+def _parse_day(value: Optional[str]) -> date:
+    try:
+        return date.fromisoformat(value) if value else date.today()
+    except ValueError:
+        return date.today()
+
+
 @app.get("/", response_class=HTMLResponse)
-def worklist(request: Request, user: dict = Depends(require_login)):
-    reports = db.list_recent_reports(user["clinic_id"])
-    return templates.TemplateResponse(
-        request, "worklist.html", {"user": user, "reports": reports}
-    )
+def worklist(request: Request, day: Optional[str] = None, user: dict = Depends(require_login)):
+    """One study date per page, today by default; scans numbered 1, 2, 3..."""
+    shown = _parse_day(day)
+    key = shown.isoformat()
+    dates = db.study_dates(user["clinic_id"])
+    studies = db.list_day_studies(user["clinic_id"], key)
+    for s in studies:
+        s["scan_name"] = SCAN_TYPE_NAMES.get(s["scan_type"], "Not identified")
+        s["time"] = _local_time(s["generated_at"])
+    # Previous / next day that has scans, skipping empty days (e.g. Sundays)
+    earlier = [d for d in dates if d < key]
+    later = [d for d in dates if d > key]
+    return templates.TemplateResponse(request, "worklist.html", {
+        "user": user,
+        "day": shown,
+        "is_today": shown == date.today(),
+        "studies": studies,
+        "prev_day": earlier[0] if earlier else None,
+        "next_day": later[-1] if later else None,
+        "latest_day": dates[0] if dates else None,
+        "counts": {
+            "draft": sum(s["document_status"] == "draft" for s in studies),
+            "reviewed": sum(s["document_status"] == "reviewed" for s in studies),
+            "flagged": sum(bool(s["needs_review"]) for s in studies),
+        },
+    })
+
+
+def _report_file(user: dict, report_id: int) -> Path:
+    file_path = db.get_report_file_path(user["clinic_id"], report_id)
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+    return Path(file_path)
 
 
 @app.get("/reports/{report_id}/download")
 def download_report(report_id: int, user: dict = Depends(require_login)):
-    file_path = db.get_report_file_path(user["clinic_id"], report_id)
-    if not file_path:
-        raise HTTPException(status_code=404, detail="Report not found")
-    # A PDF made from a Word report is re-made whenever the doctor has edited
-    # the Word file since, so the PDF never prints something different.
-    docx = Path(file_path).with_suffix(".docx")
-    if file_path.lower().endswith(".pdf") and docx.exists() and docx_pdf.is_stale(docx):
-        if docx_pdf.convert(docx) is None:
+    path = _report_file(user, report_id)
+    return FileResponse(path, filename=path.name)
+
+
+@app.get("/reports/{report_id}/pdf")
+def report_pdf(report_id: int, user: dict = Depends(require_login)):
+    """
+    PDF of a report, opened in the browser for printing. A Word report is
+    converted by Word on request - and again whenever the doctor has edited
+    it since - so the PDF always matches the Word file.
+    """
+    path = _report_file(user, report_id)
+    if path.suffix.lower() == ".docx":
+        if docx_pdf.is_stale(path) and docx_pdf.convert(path) is None:
             raise HTTPException(
                 status_code=503,
-                detail="Could not create the PDF from the Word report. "
-                       "Open the Word report and print or save it as PDF from Word.",
+                detail="Could not create the PDF. Open the Word report and "
+                       "print or save it as PDF from Word.",
             )
-    if not Path(file_path).exists():
-        raise HTTPException(status_code=404, detail="Report not found")
-    return FileResponse(file_path, filename=Path(file_path).name)
+        path = docx_pdf.pdf_path_for(path)
+    return FileResponse(path, filename=path.name, content_disposition_type="inline")
 
 
 # ---------------------------------------------------------------------------
