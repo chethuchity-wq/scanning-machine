@@ -32,6 +32,10 @@ HEARTBEAT_URL = ""                   # Dead-man's-switch ping URL (e.g. healthch
 # Dashboard (webapp/)
 # ---------------------------------------------------------------------------
 DB_PATH = "data/app.db"                        # Worklist/clinic-settings database
+# Set False where the dashboard is only ever opened on the clinic PC itself:
+# no login page or accounts, and it then refuses every connection that isn't
+# from this machine (patient reports must not be open to the whole LAN).
+DASHBOARD_LOGIN_REQUIRED = True
 SESSION_SECRET_FILE = "data/session_secret.txt"  # Auto-generated on first run
 
 # ---------------------------------------------------------------------------

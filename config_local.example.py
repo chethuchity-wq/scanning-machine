@@ -26,6 +26,12 @@ you don't set here just keeps its default from config.py.
 # CLINIC_LOGO = r"C:\path\to\logo.png"
 
 # ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+# Single-PC clinic: no login, dashboard reachable only from this PC itself.
+# DASHBOARD_LOGIN_REQUIRED = False
+
+# ---------------------------------------------------------------------------
 # Reporting doctor (Word reports - PCPNDT declaration + signature)
 # ---------------------------------------------------------------------------
 # Normally set on the dashboard's Settings page instead. These only seed a

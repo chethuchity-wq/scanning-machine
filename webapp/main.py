@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -35,8 +35,27 @@ if not SECRET_FILE.exists():
     SECRET_FILE.write_text(secrets.token_hex(32))
 SESSION_SECRET = SECRET_FILE.read_text().strip()
 
+LOGIN_REQUIRED = getattr(config, "DASHBOARD_LOGIN_REQUIRED", True)
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
 app = FastAPI(title="Ultrasound Reporting Dashboard")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+
+
+@app.middleware("http")
+async def _local_only_without_login(request: Request, call_next):
+    """
+    With logins off, the PC itself is the only access control, so refuse
+    everyone else - even if the server was started with --host 0.0.0.0.
+    """
+    if not LOGIN_REQUIRED:
+        host = request.client.host if request.client else ""
+        if host not in _LOOPBACK_HOSTS:
+            return PlainTextResponse(
+                "This dashboard can only be opened on the clinic PC itself.",
+                status_code=403,
+            )
+    return await call_next(request)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -75,6 +94,9 @@ def current_user(request: Request) -> Optional[dict]:
 
 
 def require_login(request: Request) -> dict:
+    if not LOGIN_REQUIRED:
+        # Single local user; "local" hides the account/logout links
+        return {"id": None, "username": "", "clinic_id": db.get_default_clinic_id(), "role": "local"}
     user = current_user(request)
     if user is None:
         raise RedirectRequired("/login")
@@ -87,6 +109,7 @@ def require_admin(request: Request) -> dict:
     read, so any staff account could create further accounts or delete the
     admin - the dashboard had one privilege level in practice.
     """
+    accounts_enabled()
     user = require_login(request)
     if user.get("role") != "admin":
         raise HTTPException(
@@ -94,6 +117,12 @@ def require_admin(request: Request) -> dict:
             detail="Only an admin account can manage dashboard users.",
         )
     return user
+
+
+def accounts_enabled() -> None:
+    """Login, setup and account pages don't exist with logins off - go to the worklist."""
+    if not LOGIN_REQUIRED:
+        raise RedirectRequired("/")
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +171,7 @@ def _current_setup_token() -> Optional[str]:
     return SETUP_TOKEN_FILE.read_text().strip()
 
 
-_token = _current_setup_token()
+_token = _current_setup_token() if LOGIN_REQUIRED else None
 if _token:
     print("=" * 60)
     print("  First-run setup required.")
@@ -151,7 +180,7 @@ if _token:
     print("=" * 60)
 
 
-@app.get("/setup", response_class=HTMLResponse)
+@app.get("/setup", response_class=HTMLResponse, dependencies=[Depends(accounts_enabled)])
 def setup_form(request: Request):
     if db.user_count() > 0:
         return RedirectResponse("/login", status_code=303)
@@ -160,7 +189,7 @@ def setup_form(request: Request):
     )
 
 
-@app.post("/setup")
+@app.post("/setup", dependencies=[Depends(accounts_enabled)])
 def setup_submit(
     request: Request,
     setup_token: str = Form(...),
@@ -210,7 +239,7 @@ def setup_submit(
 # Login / logout
 # ---------------------------------------------------------------------------
 
-@app.get("/login", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse, dependencies=[Depends(accounts_enabled)])
 def login_form(request: Request):
     if db.user_count() == 0:
         return RedirectResponse("/setup", status_code=303)
@@ -219,7 +248,7 @@ def login_form(request: Request):
     )
 
 
-@app.post("/login")
+@app.post("/login", dependencies=[Depends(accounts_enabled)])
 def login_submit(
     request: Request,
     username: str = Form(...),
@@ -243,7 +272,7 @@ def login_submit(
     return RedirectResponse("/", status_code=303)
 
 
-@app.get("/logout")
+@app.get("/logout", dependencies=[Depends(accounts_enabled)])
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
@@ -394,14 +423,14 @@ def users_delete(
 # Account (change own password)
 # ---------------------------------------------------------------------------
 
-@app.get("/account", response_class=HTMLResponse)
+@app.get("/account", response_class=HTMLResponse, dependencies=[Depends(accounts_enabled)])
 def account_form(request: Request, user: dict = Depends(require_login)):
     return templates.TemplateResponse(
         request, "account.html", {"user": user, "error": None, "saved": False, "csrf_token": csrf_token(request)}
     )
 
 
-@app.post("/account")
+@app.post("/account", dependencies=[Depends(accounts_enabled)])
 def account_submit(
     request: Request,
     user: dict = Depends(require_login),

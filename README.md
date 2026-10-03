@@ -129,7 +129,11 @@ uvicorn webapp.main:app --host 0.0.0.0 --port 8000
 
 Or, via Docker, it's already wired up as the `us-webapp` service in `docker-compose.yml` (started automatically by `deploy.bat`) at **http://localhost:8080**.
 
-On first visit, it prompts you to create the first admin account (there's no default password). Every report `pipeline.py` generates is automatically recorded and shows up in the worklist. Orthanc connection settings are still edited in `config_local.py` (a service restart is needed for those to apply); clinic name/address/phone shown on PDF reports can be edited live from the Settings page.
+On first visit, it prompts you to create the first admin account (there's no default password).
+
+**Single-PC clinic, no login:** set `DASHBOARD_LOGIN_REQUIRED = False` in `config_local.py`
+and start it with `--host 127.0.0.1`. There are then no accounts or login page, and the
+dashboard refuses every connection that doesn't come from the PC itself. Every report `pipeline.py` generates is automatically recorded and shows up in the worklist. Orthanc connection settings are still edited in `config_local.py` (a service restart is needed for those to apply); clinic name/address/phone shown on PDF reports can be edited live from the Settings page.
 
 ## Output
 
