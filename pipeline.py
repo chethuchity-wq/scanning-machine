@@ -55,6 +55,7 @@ from extract_measurements import extract_from_sr, extract_from_image
 from ocr_extract import extract_measurements_ocr
 from image_extract import dicom_to_png_bytes
 from report_generator import generate_report
+import docx_pdf
 from scan_classifier import classify_scan, classify_scan_from_filename
 import fill_report as _fill_report
 from webapp import db as dashboard_db
@@ -383,6 +384,7 @@ def _build_docx_data(
     clinic_info = clinic_info or {}
     data: dict = {
         "patient_name": patient_info.get("patient_name", ""),
+        "patient_id": patient_info.get("patient_id", ""),
         "age": patient_info.get("age", ""),
         "date": patient_info.get("study_date", ""),
         "ref_by": patient_info.get("referring_physician", "")
@@ -526,6 +528,27 @@ def _compute_review_flags(
         reasons.append("doctor name not set in Settings - PCPNDT declaration left blank")
 
     return bool(reasons), "; ".join(reasons)
+
+
+def _make_pdf(
+    docx_path: Path | None,
+    patient_info: dict,
+    measurements: list[dict],
+    images: list[bytes],
+    clinic_info: dict,
+) -> Path:
+    """
+    The PDF is Word's own conversion of the Word report, so the two always
+    print the same. If Word fails here, the path is still returned: the
+    dashboard converts it when the PDF is downloaded. Only when there is no
+    Word report (scan type unknown) is the measurements-only summary built.
+    """
+    if docx_path is None:
+        return generate_report(patient_info, measurements, images=images, clinic_info=clinic_info)
+    pdf = docx_pdf.convert(docx_path)
+    if pdf is None:
+        print("  [PDF] Will be created from the Word report when downloaded")
+    return docx_pdf.pdf_path_for(docx_path)
 
 
 def extract_patient_info(ds: pydicom.Dataset) -> dict:
@@ -680,7 +703,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str) -> Path:
     if needs_review:
         print(f"  [REVIEW] Flagged: {review_reason}")
 
-    report_path = generate_report(patient_info, all_measurements, images=report_images, clinic_info=clinic_info)
+    report_path = _make_pdf(docx_path, patient_info, all_measurements, report_images, clinic_info)
     print(f"  PDF report: {report_path}")
     dashboard_db.record_report(
         clinic_id=clinic_id,
@@ -806,7 +829,7 @@ def process_local_folder(folder_path: str) -> Path:
         print(f"  [REVIEW] Flagged: {review_reason}")
 
     # Generate PDF report
-    report_path = generate_report(patient_info, all_measurements, images=report_images, clinic_info=clinic_info)
+    report_path = _make_pdf(docx_path, patient_info, all_measurements, report_images, clinic_info)
     print(f"\n  PDF report: {report_path}")
     dashboard_db.record_report(
         clinic_id=clinic_id,

@@ -207,10 +207,11 @@ def _add_images_section(doc: Document, images: list[bytes] | None, images_per_ro
     if not images:
         return
 
-    doc.add_paragraph()
-    _heading(doc, "ULTRASOUND IMAGES", size=11, center=False)
+    # Images on their own page, so they never split the report text
+    doc.add_page_break()
+    _heading(doc, "ULTRASOUND IMAGES", size=11)
 
-    image_width = Inches(2.7)
+    image_width = Inches(3.1)
     for row_start in range(0, len(images), images_per_row):
         row_images = images[row_start:row_start + images_per_row]
         table = doc.add_table(rows=1, cols=images_per_row)

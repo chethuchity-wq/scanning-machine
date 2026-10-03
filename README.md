@@ -137,7 +137,15 @@ dashboard refuses every connection that doesn't come from the PC itself. Every r
 
 ## Output
 
-PDF reports are saved to the `reports/` directory (configurable in `config.py`). Each report includes:
+When a Word report is generated (see below), its PDF is Microsoft Word's own
+conversion of it (`docx_pdf.py`), saved next to it in `reports/filled/` with the
+same name, so the two always print the same. Downloading the PDF from the
+dashboard re-makes it whenever the Word report has been edited since. This needs
+Microsoft Word installed on the PC; if Word fails, the pipeline logs it and the
+PDF is made on download instead.
+
+Only when no Word report can be made (scan type not identified) is a
+measurements-only summary PDF built, saved to `reports/`. It includes:
 
 - Patient demographics
 - Measurements table with values, units, and normal ranges
@@ -196,8 +204,13 @@ Each report is built from the clinic's own Word form in `templates/<scan_type>.d
 field with no value is left blank for the doctor. All other wording (standard
 normal findings, notes, advice) prints exactly as written in the form.
 
-To change a report's wording, edit its template in Word and keep the `{{...}}`
-markers intact. A scan type without a template falls back to the built-in layout
+The forms are laid out by `tools/build_templates.py`: patient details box,
+measurement and Doppler tables, aligned findings, impression, PCPNDT declaration
+and doctor's signature, in black and white with a 1.5" top margin for the
+clinic's pre-printed letterhead. Re-running it overwrites `templates/`.
+
+To change a report's wording, edit `tools/build_templates.py` and re-run it (or
+edit the template in Word, keeping the `{{...}}` markers intact). A scan type without a template falls back to the built-in layout
 in `fill_report.py`. Dates print as DD/MM/YYYY; the doctor's name and
 qualification come from the dashboard Settings page.
 

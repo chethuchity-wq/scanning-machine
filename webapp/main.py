@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 import config
+import docx_pdf
 from webapp import db
 from webapp.auth import hash_password, verify_password
 
@@ -293,7 +294,19 @@ def worklist(request: Request, user: dict = Depends(require_login)):
 @app.get("/reports/{report_id}/download")
 def download_report(report_id: int, user: dict = Depends(require_login)):
     file_path = db.get_report_file_path(user["clinic_id"], report_id)
-    if not file_path or not Path(file_path).exists():
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Report not found")
+    # A PDF made from a Word report is re-made whenever the doctor has edited
+    # the Word file since, so the PDF never prints something different.
+    docx = Path(file_path).with_suffix(".docx")
+    if file_path.lower().endswith(".pdf") and docx.exists() and docx_pdf.is_stale(docx):
+        if docx_pdf.convert(docx) is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not create the PDF from the Word report. "
+                       "Open the Word report and print or save it as PDF from Word.",
+            )
+    if not Path(file_path).exists():
         raise HTTPException(status_code=404, detail="Report not found")
     return FileResponse(file_path, filename=Path(file_path).name)
 

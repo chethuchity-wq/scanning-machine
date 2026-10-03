@@ -262,8 +262,9 @@ def list_recent_reports(clinic_id: int, limit: int = 200) -> list[dict]:
 
 def _document_status(report_type: str, file_path: str, generated_at: datetime) -> str:
     """
-    'measurements' for PDFs - they're never edited, always just the
-    auto-generated summary, not the doctor-signed document.
+    A PDF made from a Word report (same name, next to it) takes that Word
+    report's status. Any other PDF is 'measurements' - the auto-generated
+    summary made when no Word report could be, not the doctor-signed document.
 
     For Word docs, compares the file's last-modified time against when the
     pipeline generated it. Doctors edit the .docx in place on the clinic PC
@@ -272,7 +273,10 @@ def _document_status(report_type: str, file_path: str, generated_at: datetime) -
     completed it - no separate "mark as reviewed" step to forget.
     """
     if report_type != "docx":
-        return "measurements"
+        docx = Path(file_path).with_suffix(".docx")
+        if not docx.exists():
+            return "measurements"
+        file_path = str(docx)
     try:
         mtime = datetime.utcfromtimestamp(Path(file_path).stat().st_mtime)
     except OSError:
