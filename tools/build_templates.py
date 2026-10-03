@@ -627,16 +627,18 @@ def _abdomen(sex: str, pelvis: list[tuple[str, str]]) -> Document:
 
 
 def abdomen_pelvis_female() -> Document:
+    # Ovary volume: the scanner shows one when the ovary is measured in 3 distances
     return _abdomen("F", [
         ("Uterus", "Anteverted, measuring {{uterus_size}} cm, endometrium thickness {{endometrium_mm}} mm."),
-        ("Right ovary", "Measuring {{right_ovary_size}} cm."),
-        ("Left ovary", "Measuring {{left_ovary_size}} cm."),
+        ("Right ovary", "Measuring {{right_ovary_size}} cm, volume ~{{right_ovary_volume}} ml."),
+        ("Left ovary", "Measuring {{left_ovary_size}} cm, volume ~{{left_ovary_volume}} ml."),
     ])
 
 
 def abdomen_pelvis_male() -> Document:
     return _abdomen("M", [
-        ("Prostate", "Normal in size and echotexture, measuring {{prostate_size}} cm."),
+        ("Prostate", "Normal in size and echotexture, measuring {{prostate_size}} cm, "
+                     "volume ~{{prostate_volume}} ml."),
     ])
 
 

@@ -31,8 +31,11 @@ FIELDS = {
     "uterus_size": ("Uterus", 1),
     "endometrium_mm": ("Uterus", 2),
     "right_ovary_size": ("Right ovary", 1),
+    "right_ovary_volume": ("Right ovary", 2),
     "left_ovary_size": ("Left ovary", 1),
+    "left_ovary_volume": ("Left ovary", 2),
     "prostate_size": ("Prostate", 1),
+    "prostate_volume": ("Prostate", 2),
 }
 
 LIVER = (10.0, 20.0)                       # span / length
@@ -133,8 +136,10 @@ def suggest(images: list[dict], scan_type: str) -> list[dict]:
                 continue  # urinary bladder - the forms print no bladder size
             if male and _within(volume, PROSTATE_VOLUME_ML) and n == 3:
                 add("prostate_size", _fmt(*lengths), "cm", image, f"3 sizes with volume {volume:g} ml")
+                add("prostate_volume", f"{volume:g}", "ml", image, "volume shown on the scan")
             elif not male and n >= 2 and all(_within(x, OVARY) or x < 1.0 for x in lengths):
-                ovaries.append({"value": _fmt(*lengths), "image": image, "why": f"small volume {volume:g} ml"})
+                ovaries.append({"value": _fmt(*lengths), "image": image, "why": f"small volume {volume:g} ml",
+                                "volume": f"{volume:g}"})
             continue
 
         if n == 1:
@@ -173,6 +178,11 @@ def suggest(images: list[dict], scan_type: str) -> list[dict]:
             ovaries.append({"value": _fmt(*lengths[:2]), "image": image, "why": "first pair of small sizes"})
             ovaries.append({"value": _fmt(*lengths[2:]), "image": image, "why": "second pair of small sizes"})
             continue
+        if male and n == 3 and "prostate_size" not in found and all(_within(x, (1.5, 7.0)) for x in lengths):
+            add("prostate_size", _fmt(*lengths), "cm", image, "three sizes in the pelvis")
+            add("prostate_volume", f"{lengths[0] * lengths[1] * lengths[2] / 2:.1f}", "ml", image,
+                "calculated: sizes multiplied, divided by 2")
+            continue
         # Uterus: three sizes (a fourth small one is the endometrium)
         if not male and not uterus_seen:
             sizes, extra = lengths[:3], lengths[3:]
@@ -192,10 +202,10 @@ def suggest(images: list[dict], scan_type: str) -> list[dict]:
             add("right_kidney_size", right["value"], "cm", right["image"], right["why"] + ", measured first")
         if left:
             add("left_kidney_size", left["value"], "cm", left["image"], left["why"])
-    if ovaries:
-        add("right_ovary_size", ovaries[0]["value"], "cm", ovaries[0]["image"], ovaries[0]["why"] + ", first")
-        if len(ovaries) > 1:
-            add("left_ovary_size", ovaries[1]["value"], "cm", ovaries[1]["image"], ovaries[1]["why"] + ", second")
+    for side, ovary, order in zip(("right", "left"), ovaries, ("first", "second")):
+        add(f"{side}_ovary_size", ovary["value"], "cm", ovary["image"], f"{ovary['why']}, {order}")
+        if ovary.get("volume"):
+            add(f"{side}_ovary_volume", ovary["volume"], "ml", ovary["image"], "volume shown on the scan")
 
     order = list(FIELDS)
     return sorted(found.values(), key=lambda s: order.index(s["field"]))

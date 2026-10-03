@@ -215,10 +215,15 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
     ("uterus", "uterus_size"),
     ("endometrial thickness", "endometrium_mm"),
     ("endometrium", "endometrium_mm"),
+    ("right ovary volume", "right_ovary_volume"),
+    ("rt ovary volume", "right_ovary_volume"),
     ("right ovary", "right_ovary_size"),
     ("rt ovary", "right_ovary_size"),
+    ("left ovary volume", "left_ovary_volume"),
+    ("lt ovary volume", "left_ovary_volume"),
     ("left ovary", "left_ovary_size"),
     ("lt ovary", "left_ovary_size"),
+    ("prostate volume", "prostate_volume"),
     ("prostate", "prostate_size"),
     # Doppler
     ("right uterine artery", "doppler_right_pi"),
@@ -256,6 +261,8 @@ _FIELD_UNITS: dict[str, str] = {
     "doppler_right_pi": "", "doppler_left_pi": "",
     "doppler_umbilical_pi": "", "doppler_mca_pi": "",
     "prostate_size": "cm",
+    "prostate_volume": "ml",
+    "right_ovary_volume": "ml", "left_ovary_volume": "ml",
 }
 
 # Source unit strings (as they arrive from DICOM SR MeasurementUnitsCodeSequence
@@ -273,12 +280,14 @@ _UNIT_ALIASES: dict[str, tuple[str, float]] = {
     "bpm": ("rate", 1.0), "beats/min": ("rate", 1.0),
     "beats per minute": ("rate", 1.0), "/min": ("rate", 1.0),
     "min-1": ("rate", 1.0), "{h.b.}/min": ("rate", 1.0),
+    "ml": ("volume", 1000.0), "cc": ("volume", 1000.0), "cm3": ("volume", 1000.0),
+    "mm3": ("volume", 1.0),
 }
 
 # Target unit -> (dimension, multiplier into the base unit)
 _TARGET_UNITS: dict[str, tuple[str, float]] = {
     "mm": ("length", 1.0), "cm": ("length", 10.0),
-    "g": ("mass", 1.0), "bpm": ("rate", 1.0),
+    "g": ("mass", 1.0), "bpm": ("rate", 1.0), "ml": ("volume", 1000.0),
 }
 
 # Names that must never be auto-filled into a fetal biometry field.
@@ -416,6 +425,20 @@ def _composite_sizes(measurements: list[dict]) -> dict:
     }
 
 
+def prostate_volume_from_size(size: str) -> str:
+    """
+    Prostate volume (ml) from "L x W x H" in cm, as the clinic calculates it:
+    the three sizes multiplied, divided by 2. "" unless there are 3 sizes.
+    """
+    try:
+        dims = [float(x) for x in size.lower().split("x")]
+    except ValueError:
+        return ""
+    if len(dims) != 3:
+        return ""
+    return f"{dims[0] * dims[1] * dims[2] / 2:.1f}"
+
+
 def _build_docx_data(
     patient_info: dict,
     measurements: list[dict],
@@ -480,6 +503,11 @@ def _build_docx_data(
             )
             continue
         data[field] = converted
+
+    if data.get("prostate_size") and not data.get("prostate_volume"):
+        volume = prostate_volume_from_size(data["prostate_size"])
+        if volume:
+            data["prostate_volume"] = volume
 
     data["_unit_warnings"] = warnings
     return data
