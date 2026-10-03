@@ -185,6 +185,8 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
     ("estimated foetal weight", "efw"),
     ("estimated fetal weight", "efw"),
     ("efw", "efw"),
+    ("cervical length", "cervix_length"),
+    ("cervix length", "cervix_length"),
     ("foetal heart rate", "fhr"),
     ("fetal heart rate", "fhr"),
     ("heart rate", "fhr"),
@@ -230,7 +232,7 @@ _FIELD_UNITS: dict[str, str] = {
     "tcd": "cm", "cisterna_magna": "cm", "lvta": "cm", "foot_length": "cm",
     "afi": "cm", "liver_size": "cm", "spleen_size": "cm",
     "right_kidney_size": "cm", "left_kidney_size": "cm", "uterus_size": "cm",
-    "right_ovary_size": "cm", "left_ovary_size": "cm",
+    "right_ovary_size": "cm", "left_ovary_size": "cm", "cervix_length": "cm",
     # printed as "mm"
     "nt": "mm", "nasal_bone": "mm", "nasal_bone_length": "mm",
     "nuchal_fold": "mm", "endometrium_mm": "mm",
@@ -562,8 +564,12 @@ def extract_patient_info(ds: pydicom.Dataset) -> dict:
     # PatientSex: "M", "F", or "O"
     sex = safe((0x0010, 0x0040)).upper()  # PatientSex
 
+    def person_name(tag):
+        # DICOM names pad empty components: "MADHULATHA^^^^" -> "MADHULATHA"
+        return " ".join(safe(tag).replace("^", " ").split())
+
     return {
-        "patient_name": safe((0x0010, 0x0010)).replace("^", " "),
+        "patient_name": person_name((0x0010, 0x0010)),
         "patient_id": safe((0x0010, 0x0020)),
         "age": age,
         "sex": sex,            # "M" or "F"
@@ -572,7 +578,7 @@ def extract_patient_info(ds: pydicom.Dataset) -> dict:
         "accession_no": safe((0x0008, 0x0050)),
         "modality": safe((0x0008, 0x0060)),
         "description": safe((0x0008, 0x1030)) or safe((0x0008, 0x103E)),
-        "referring_physician": safe((0x0008, 0x0090)).replace("^", " "),
+        "referring_physician": person_name((0x0008, 0x0090)),
         "institution": safe((0x0008, 0x0080)),
     }
 

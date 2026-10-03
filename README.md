@@ -184,6 +184,19 @@ Reference values are based on standard adult radiology textbooks. Pediatric and 
 
 Reports are saved to `reports/filled/` and named `<PatientName>_<scan_type>_<date>.docx`.
 
+### Clinic templates
+
+Each report is built from the clinic's own Word form in `templates/<scan_type>.docx`
+(e.g. `templates/early_pregnancy.docx`). Blanks are marked `{{field}}` — `{{crl}}`,
+`{{ga_scan_weeks}}`, `{{doctor_name}}` and so on — and filled from the scan; a
+field with no value is left blank for the doctor. All other wording (standard
+normal findings, notes, advice) prints exactly as written in the form.
+
+To change a report's wording, edit its template in Word and keep the `{{...}}`
+markers intact. A scan type without a template falls back to the built-in layout
+in `fill_report.py`. Dates print as DD/MM/YYYY; the doctor's name and
+qualification come from the dashboard Settings page.
+
 ### Scan type classification
 
 `scan_classifier.py` detects the scan type automatically using three layers:

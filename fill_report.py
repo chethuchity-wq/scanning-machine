@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -58,6 +59,13 @@ DOCTOR_QUAL = getattr(config, "DOCTOR_QUAL", "")
 REFERRING_DEFAULT = getattr(config, "REFERRING_DEFAULT", "")
 DOCTOR_BLANK = "____________________"
 OUTPUT_DIR = Path("reports/filled")
+
+# The clinic's own report formats, one per scan type (templates/<scan_type>.docx).
+# Blanks are marked {{field}}; see _fill_template. A scan type with no template
+# falls back to the generate_*_report layout below.
+TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+_DATE_FIELDS = ("date", "lmp", "edd_scan", "edd_lmp")
 
 STANDARD_NOTE = (
     "Note: This is only a radiological impression and not a diagnosis and has its "
@@ -942,9 +950,96 @@ SCAN_GENERATORS = {
 }
 
 
+def _replace_span(paragraph, start: int, end: int, new: str) -> None:
+    """
+    Replace characters [start, end) of a paragraph's text, even when they span
+    several runs. Word splits text into runs unpredictably (spell-check, edit
+    history), so a placeholder typed as "{{crl}}" may be stored as "{{", "crl",
+    "}}". The replacement takes the formatting of the run where it starts.
+    """
+    pos = 0
+    first = None
+    for run in paragraph.runs:
+        run_start, run_end = pos, pos + len(run.text)
+        pos = run_end
+        if run_end <= start or run_start >= end:
+            continue
+        text = run.text
+        suffix = text[end - run_start:] if run_end > end else ""
+        if first is None:
+            first = run
+            run.text = text[:start - run_start] + new + suffix
+        else:
+            run.text = suffix
+
+
+def _iter_paragraphs(doc: Document):
+    """Every paragraph in the body, tables (including nested) and headers/footers."""
+    def walk(container):
+        for paragraph in container.paragraphs:
+            yield paragraph
+        for table in container.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    yield from walk(cell)
+
+    yield from walk(doc)
+    for section in doc.sections:
+        for part in (section.header, section.footer):
+            yield from walk(part)
+
+
+def _display_date(value: str) -> str:
+    """Dates print as DD/MM/YYYY, the clinic's format; anything unparseable as-is."""
+    for fmt in ("%Y-%m-%d", "%Y%m%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(str(value).strip(), fmt).strftime("%d/%m/%Y")
+        except ValueError:
+            continue
+    return str(value)
+
+
+def _template_values(d: dict) -> dict:
+    """Placeholder values for a template: the data dict plus derived fields."""
+    values = {
+        key: str(value) for key, value in d.items()
+        if not key.startswith("_") and isinstance(value, (str, int, float))
+    }
+    for key in _DATE_FIELDS:
+        if values.get(key):
+            values[key] = _display_date(values[key])
+    doctor_name, doctor_qual = _doctor(d)
+    values["doctor_name"] = doctor_name or DOCTOR_BLANK
+    values["doctor_qual"] = doctor_qual
+    values["ref_by"] = d.get("ref_by") or REFERRING_DEFAULT
+    return values
+
+
+def _fill_template(template: Path, d: dict) -> Document:
+    """
+    Open a clinic template and fill every {{field}}. A field with no value is
+    left blank for the doctor to write in, exactly as the nurse's blank form.
+    """
+    doc = Document(str(template))
+    values = _template_values(d)
+    for paragraph in _iter_paragraphs(doc):
+        # Offsets must come from the same runs _replace_span edits
+        # (paragraph.text also counts hyperlink text)
+        text = "".join(run.text for run in paragraph.runs)
+        if "{{" not in text:
+            continue
+        # Right to left, so earlier match offsets stay valid
+        for match in reversed(list(_PLACEHOLDER_RE.finditer(text))):
+            _replace_span(paragraph, match.start(), match.end(), values.get(match.group(1), ""))
+    return doc
+
+
 def generate_report(scan_type: str, data: dict) -> Path:
     """
     Generate a report for the given scan type.
+
+    Uses the clinic's template from templates/<scan_type>.docx when there is
+    one, otherwise the built-in layout.
 
     Args:
         scan_type: One of the keys in SCAN_GENERATORS.
@@ -958,6 +1053,11 @@ def generate_report(scan_type: str, data: dict) -> Path:
             f"Unknown scan type '{scan_type}'. "
             f"Valid types: {list(SCAN_GENERATORS)}"
         )
+    template = TEMPLATE_DIR / f"{scan_type}.docx"
+    if template.exists():
+        doc = _fill_template(template, data)
+        _add_images_section(doc, data.get("_images"))
+        return _save(doc, data.get("patient_name", "patient"), scan_type, data.get("date", ""))
     return SCAN_GENERATORS[scan_type](data)
 
 
