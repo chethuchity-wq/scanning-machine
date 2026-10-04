@@ -26,6 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import config
 import docx_pdf
 import measurement_rules
+import scan_store
 from webapp import db, docx_editor, report_images
 from webapp.auth import hash_password, verify_password
 
@@ -466,9 +467,8 @@ def study_page(
 
 
 def _scan_data_dir(study: dict) -> Optional[Path]:
-    """Images and values saved by the pipeline (pipeline.scan_data_dir)."""
-    orthanc_id = re.sub(r"[^A-Za-z0-9-]", "", study.get("orthanc_study_id") or "")
-    return Path(config.OUTPUT_DIR) / "scan_data" / orthanc_id if orthanc_id else None
+    """Images and values saved by the pipeline (see scan_store), or None."""
+    return scan_store.find(study.get("orthanc_study_id") or "")
 
 
 def _scan_data(study: dict) -> Optional[dict]:
@@ -711,6 +711,11 @@ def settings_submit(
     if not folder_error:
         fields["report_folder"] = folder
     db.update_clinic_info(user["clinic_id"], **fields)
+    if folder and not folder_error:
+        # The scans' images on this PC follow the reports to the folder
+        moved, failed = scan_store.move_local_to_report_folder()
+        if moved or failed:
+            print(f"[dashboard] Scan images moved to {folder}: {moved}, failed: {failed}")
     clinic = db.get_clinic_info(user["clinic_id"])
     context = {
         "user": user,

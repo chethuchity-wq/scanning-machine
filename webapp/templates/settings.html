@@ -26,6 +26,7 @@
     shared folder <code>\\PC-NAME\Reports</code> (use the full <code>\\</code> path, not a
     mapped drive letter). Leave blank to save them on this PC in
     <code>{{ local_folder }}</code>. Applies to new reports; earlier ones stay where they are.
+    The scans' images shown in the dashboard are kept in its <code>scan_data</code> subfolder.
   </p>
   {% if folder_error %}<p class="error">{{ folder_error }}</p>{% endif %}
   <label>Report folder <input type="text" name="report_folder" value="{{ report_folder_input if report_folder_input is defined else (clinic.report_folder or '') }}" placeholder="Blank = this PC ({{ local_folder }})"></label>

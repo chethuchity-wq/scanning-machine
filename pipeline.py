@@ -62,6 +62,7 @@ from image_extract import dicom_to_png_bytes
 from report_generator import generate_report
 from scan_classifier import classify_scan, classify_scan_from_filename
 import fill_report as _fill_report
+import scan_store
 from webapp import db as dashboard_db
 
 dashboard_db.init_db()
@@ -675,7 +676,6 @@ def _scanner_date_warning(study_date: str, received: str) -> str:
             f"check the scanner's date")
 
 
-SCAN_DATA_DIR = Path(config.OUTPUT_DIR) / "scan_data"
 _NON_CLINICAL_RE = re.compile(r"\b(id|name|sex|date|exam)\b", re.I)
 
 
@@ -684,8 +684,9 @@ def scan_image_name(n: int) -> str:
     return f"image_{n:02d}.jpg"
 
 
-def scan_data_dir(orthanc_study_id: str) -> Path:
-    return SCAN_DATA_DIR / re.sub(r"[^A-Za-z0-9-]", "", orthanc_study_id)
+def scan_data_dir(orthanc_study_id: str) -> Path | None:
+    """The scan's saved images and values (see scan_store), or None."""
+    return scan_store.find(orthanc_study_id)
 
 
 def _save_scan_data(study_id: str, scan_images: list[dict], measurements: list[dict]) -> None:
@@ -697,9 +698,8 @@ def _save_scan_data(study_id: str, scan_images: list[dict], measurements: list[d
     """
     from PIL import Image
 
-    folder = scan_data_dir(study_id)
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        folder = scan_store.target(study_id)
         for old in folder.glob("image_*.jpg"):
             old.unlink()
         images = []
@@ -1156,7 +1156,7 @@ def cleanup_orthanc(client: OrthancClient, keep_days: int = None) -> int:
             if not received or datetime.strptime(received[:8], "%Y%m%d") > cutoff:
                 continue
             # Keep the images in Orthanc if the dashboard has no copy of them
-            if not (scan_data_dir(study_id) / "scan.json").exists():
+            if scan_data_dir(study_id) is None:
                 continue
             client.delete_study(study_id)
             deleted += 1
