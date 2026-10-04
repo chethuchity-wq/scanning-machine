@@ -191,6 +191,7 @@ _MEASUREMENT_FIELD_MAP: list[tuple[str, str]] = [
     ("tcd", "tcd"),
     ("cisterna magna", "cisterna_magna"),
     ("lateral ventricular atrium", "lvta"),
+    ("lateral ventricle", "lvta"),  # Philips SR: "Lateral Ventricle width"
     ("foot length", "foot_length"),
     ("amniotic fluid index", "afi"),
     ("afi", "afi"),
@@ -510,6 +511,24 @@ def _build_docx_data(
         if volume:
             data["prostate_volume"] = volume
 
+    # EFW in whole grams with its +/- margin: 14.6% of the weight, the error of
+    # the scanner's Hadlock 1985 (BPD, HC, AC, FL) formula, as the clinic's
+    # own reports print it ("405 g +/- 59 g")
+    if data.get("efw") and not data.get("efw_error"):
+        try:
+            grams = float(data["efw"])
+            data["efw"] = f"{grams:.0f}"
+            data["efw_error"] = f"{grams * 0.146:.0f}"
+        except ValueError:
+            pass
+
+    # FL/AC ratio (%) from the femur length and abdominal circumference (both cm)
+    if data.get("fl") and data.get("ac") and not data.get("fl_ac_ratio"):
+        try:
+            data["fl_ac_ratio"] = f"{float(data['fl']) / float(data['ac']) * 100:.1f}"
+        except (ValueError, ZeroDivisionError):
+            pass
+
     data["_unit_warnings"] = warnings
     return data
 
@@ -581,6 +600,7 @@ def _compute_review_flags(
     docx_generated: bool,
     dropped_measurements: int = 0,
     doctor_name_missing: bool = False,
+    date_warning: str = "",
 ) -> tuple[bool, str]:
     """
     Flag reports whose *generation succeeded* but whose content looks
@@ -614,7 +634,27 @@ def _compute_review_flags(
     if docx_generated and doctor_name_missing:
         reasons.append("doctor name not set in Settings - PCPNDT declaration left blank")
 
+    if date_warning:
+        reasons.append(date_warning)
+
     return bool(reasons), "; ".join(reasons)
+
+
+def _scanner_date_warning(study_date: str, received: str) -> str:
+    """
+    The worklist files a scan under the scanner's own date. A scan dated more
+    than a day away from when Orthanc received it means the scanner's clock
+    is wrong (e.g. reset after a power cut) and the scan is on the wrong day.
+    """
+    try:
+        dated = datetime.strptime(study_date, "%Y-%m-%d").date()
+        arrived = datetime.strptime(received[:8], "%Y%m%d").date()
+    except (ValueError, TypeError):
+        return ""
+    if abs((dated - arrived).days) <= 1:
+        return ""
+    return (f"scan dated {dated:%d/%m/%Y} but received {arrived:%d/%m/%Y} - "
+            f"check the scanner's date")
 
 
 SCAN_DATA_DIR = Path(config.OUTPUT_DIR) / "scan_data"
@@ -898,6 +938,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
         scan_type, confidence, len(all_measurements), len(report_images),
         docx_path is not None, dropped_measurements=dropped,
         doctor_name_missing=not (clinic_info.get("doctor_name") or "").strip(),
+        date_warning=_scanner_date_warning(patient_info.get("study_date", ""), summary.get("received", "")),
     )
     if needs_review:
         print(f"  [REVIEW] Flagged: {review_reason}")

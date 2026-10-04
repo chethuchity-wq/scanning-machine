@@ -45,6 +45,7 @@ KIDNEY_LENGTH, KIDNEY_WIDTH = (6.5, 13.5), (2.8, 6.8)
 UTERUS_LONGEST = (4.5, 12.0)
 ENDOMETRIUM = (0.2, 2.2)
 OVARY = (1.0, 5.5)
+OVARY_MIN_VOLUME_ML = 1.0
 BLADDER_VOLUME_ML = 80
 PROSTATE_VOLUME_ML = (8, 80)
 
@@ -137,7 +138,9 @@ def suggest(images: list[dict], scan_type: str) -> list[dict]:
             if male and _within(volume, PROSTATE_VOLUME_ML) and n == 3:
                 add("prostate_size", _fmt(*lengths), "cm", image, f"3 sizes with volume {volume:g} ml")
                 add("prostate_volume", f"{volume:g}", "ml", image, "volume shown on the scan")
-            elif not male and n >= 2 and all(_within(x, OVARY) or x < 1.0 for x in lengths):
+            # Under 1 ml is a small lesion measured in the uterus, not an ovary
+            elif (not male and n >= 2 and volume >= OVARY_MIN_VOLUME_ML
+                  and all(_within(x, OVARY) or x < 1.0 for x in lengths)):
                 ovaries.append({"value": _fmt(*lengths), "image": image, "why": f"small volume {volume:g} ml",
                                 "volume": f"{volume:g}"})
             continue

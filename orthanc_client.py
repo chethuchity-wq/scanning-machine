@@ -421,6 +421,8 @@ it was broken will be skipped - read the current change number from Orthanc
             "patient_id": patient_tags.get("PatientID", ""),
             "study_date": main_tags.get("StudyDate", ""),
             "study_description": main_tags.get("StudyDescription", ""),
+            # When Orthanc last received an image of it ("20261004T101530")
+            "received": study.get("LastUpdate", ""),
             "modalities": sorted(modalities),
             "series_count": len(series_ids),
             "instance_count": instance_count,
