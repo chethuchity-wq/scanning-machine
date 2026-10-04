@@ -74,18 +74,3 @@ def dicom_to_png_bytes(ds: pydicom.Dataset) -> Optional[bytes]:
     image.save(buf, format="PNG")
     return buf.getvalue()
 
-
-def extract_report_images(datasets: list, max_images: int) -> list[bytes]:
-    """
-    Extract up to `max_images` PNG images (as bytes) from a list of DICOM
-    datasets, for embedding in generated reports. Datasets without pixel
-    data (e.g. Structured Reports) are skipped automatically.
-    """
-    images: list[bytes] = []
-    for ds in datasets:
-        if len(images) >= max_images:
-            break
-        png_bytes = dicom_to_png_bytes(ds)
-        if png_bytes:
-            images.append(png_bytes)
-    return images

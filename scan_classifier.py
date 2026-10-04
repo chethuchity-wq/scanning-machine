@@ -458,7 +458,7 @@ def classify_scan(
 
     Returns:
         (scan_type, confidence, method)
-        scan_type  – key for fill_report.SCAN_GENERATORS, or "unknown"
+        scan_type  – one of fill_report.SCAN_TYPES, or "unknown"
         confidence – 0.0–1.0
         method     – "dicom_tag" | "ocr" | "fingerprint" | "unknown"
 
@@ -546,7 +546,6 @@ def classify_scan_from_filename(filename: str) -> tuple[str, float, str]:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
 
     print("=== Scan Classifier – Text Demo ===\n")
 

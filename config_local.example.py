@@ -35,7 +35,7 @@ you don't set here just keeps its default from config.py.
 # Reporting doctor (Word reports - PCPNDT declaration + signature)
 # ---------------------------------------------------------------------------
 # Normally set on the dashboard's Settings page instead. These only seed a
-# brand-new database and cover the interactive `python fill_report.py` CLI.
+# brand-new database.
 # DOCTOR_NAME = "Dr. A.B. Name"
 # DOCTOR_QUAL = "MBBS. MDRD."
 # REFERRING_DEFAULT = "Dr. C.D. Name"

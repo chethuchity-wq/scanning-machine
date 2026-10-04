@@ -562,8 +562,3 @@ def evaluate_measurement(measurement_name: str, value: float, unit: str = "") ->
         "message": messages[0] if messages else "",
     }
 
-
-def get_organ_ranges(organ: str) -> list[NormalRange]:
-    """Get all normal ranges for a specific organ."""
-    organ_lower = organ.lower()
-    return [nr for nr in NORMAL_RANGES if nr.organ.lower() == organ_lower]

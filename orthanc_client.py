@@ -2,8 +2,8 @@
 Orthanc REST API Client
 ========================
 Provides methods to interact with the Orthanc DICOM server:
-- List patients, studies, series, instances
-- Download DICOM files
+- List studies, series, instances
+- Read DICOM instances, delete studies
 - Monitor for new/stable studies
 - Query study metadata
 
@@ -12,7 +12,7 @@ Usage:
 
     client = OrthancClient()
     studies = client.list_studies()
-    client.download_study("study-orthanc-id", output_dir="./dicom_cache")
+    summary = client.get_study_summary(studies[0])
 """
 
 import io
@@ -59,18 +59,6 @@ class OrthancClient:
     # ------------------------------------------------------------------
     # Patients
     # ------------------------------------------------------------------
-
-    def list_patients(self) -> list[str]:
-        """Return list of all patient Orthanc IDs."""
-        resp = self.session.get(f"{self.url}/patients")
-        resp.raise_for_status()
-        return resp.json()
-
-    def get_patient(self, patient_id: str) -> dict:
-        """Get patient details."""
-        resp = self.session.get(f"{self.url}/patients/{patient_id}")
-        resp.raise_for_status()
-        return resp.json()
 
     # ------------------------------------------------------------------
     # Studies
@@ -157,18 +145,6 @@ class OrthancClient:
         series = self.get_series(series_id)
         return series.get("Instances", [])
 
-    def get_instance(self, instance_id: str) -> dict:
-        """Get instance metadata."""
-        resp = self.session.get(f"{self.url}/instances/{instance_id}")
-        resp.raise_for_status()
-        return resp.json()
-
-    def get_instance_tags(self, instance_id: str) -> dict:
-        """Get simplified DICOM tags for an instance."""
-        resp = self.session.get(f"{self.url}/instances/{instance_id}/simplified-tags")
-        resp.raise_for_status()
-        return resp.json()
-
     def download_instance(self, instance_id: str) -> bytes:
         """Download raw DICOM file bytes for an instance."""
         resp = self.session.get(f"{self.url}/instances/{instance_id}/file")
@@ -183,49 +159,6 @@ class OrthancClient:
     # ------------------------------------------------------------------
     # Download helpers
     # ------------------------------------------------------------------
-
-    def download_study(self, study_id: str, output_dir: str = None) -> list[Path]:
-        """
-        Download all DICOM instances in a study to disk.
-
-        Args:
-            study_id: Orthanc study ID
-            output_dir: Directory to save files (default: config.DICOM_CACHE_DIR)
-
-        Returns:
-            List of saved file paths
-        """
-        output_dir = Path(output_dir or config.DICOM_CACHE_DIR)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        saved_files = []
-        series_ids = self.list_series(study_id)
-
-        for series_id in series_ids:
-            instance_ids = self.list_instances(series_id)
-            for instance_id in instance_ids:
-                dicom_bytes = self.download_instance(instance_id)
-                file_path = output_dir / f"{instance_id}.dcm"
-                file_path.write_bytes(dicom_bytes)
-                saved_files.append(file_path)
-
-        return saved_files
-
-    def download_series(self, series_id: str, output_dir: str = None) -> list[Path]:
-        """Download all instances in a series to disk."""
-        output_dir = Path(output_dir or config.DICOM_CACHE_DIR)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        saved_files = []
-        instance_ids = self.list_instances(series_id)
-
-        for instance_id in instance_ids:
-            dicom_bytes = self.download_instance(instance_id)
-            file_path = output_dir / f"{instance_id}.dcm"
-            file_path.write_bytes(dicom_bytes)
-            saved_files.append(file_path)
-
-        return saved_files
 
     # ------------------------------------------------------------------
     # Change monitoring (for pipeline)

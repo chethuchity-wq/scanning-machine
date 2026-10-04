@@ -113,12 +113,6 @@ python pipeline.py watch
 
 This runs continuously, polling Orthanc every 10 seconds (configurable). When a new study becomes stable (all images received), it automatically extracts measurements and generates a PDF report.
 
-### Original Excel export (still works)
-
-```bash
-python read_dicom.py --input "D:\DICOM_Export" --output "measurements.xlsx"
-```
-
 ## Dashboard (worklist + settings)
 
 A small web dashboard runs alongside the pipeline so clinic staff can browse and download generated reports, and edit clinic display info, without touching files or the command line.
@@ -277,7 +271,6 @@ scanning-machine/
 ├── fill_report.py            # Word (.docx) report generation
 ├── image_extract.py          # DICOM pixel data → PNG for report embedding
 ├── pipeline.py               # Main entry point / orchestrator
-├── read_dicom.py             # Original Excel-based extractor
 ├── webapp/                   # Dashboard (worklist + settings web UI)
 │   ├── main.py                # FastAPI app / routes
 │   ├── db.py                  # SQLite models (clinics, users, studies, reports)

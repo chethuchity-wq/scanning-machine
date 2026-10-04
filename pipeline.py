@@ -11,7 +11,7 @@ Orchestrates the full workflow:
 Modes:
   - watch:  Poll Orthanc for new stable studies and auto-generate reports
   - study:  Process a specific study by Orthanc ID
-  - folder: Process a local folder of DICOM files (like your existing read_dicom.py)
+  - folder: Process a local folder of DICOM files
   - list:   List recent studies from Orthanc
 
 Usage:
@@ -1011,7 +1011,6 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
 def process_local_folder(folder_path: str) -> Path:
     """
     Process a local folder of DICOM files and generate a PDF report.
-    This is similar to your existing read_dicom.py but with the full pipeline.
 
     Returns:
         Path to the generated report (Word, or the measurements PDF)

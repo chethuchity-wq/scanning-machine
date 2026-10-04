@@ -515,22 +515,3 @@ def extract_measurements_ocr(ds: Dataset) -> list[dict]:
 
     return unique
 
-
-def extract_all_text_ocr(ds: Dataset) -> str:
-    """
-    Extract ALL text from the ultrasound image (for debugging/inspection).
-    Returns the raw concatenated OCR text.
-    """
-    if not HAS_PIL or not HAS_TESSERACT:
-        return ""
-
-    img = _pixel_array_to_image(ds)
-    if img is None:
-        return ""
-
-    processed = _preprocess_for_ocr(img)
-    try:
-        text = pytesseract.image_to_string(processed)
-        return text
-    except Exception as e:
-        return f"OCR error: {e}"
