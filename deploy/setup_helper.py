@@ -16,7 +16,8 @@ dependencies are installed. Safe to re-run: every step is idempotent.
      and prepared for use by the background tasks
   7. registers the "Ultrasound Pipeline" and "Ultrasound Dashboard"
      scheduled tasks (start at boot as SYSTEM, no time limit, restart on
-     failure) and starts them
+     failure) and starts them; with Word, the dashboard then runs as this
+     Windows user (asks for the password), as Word does not start for SYSTEM
   8. Desktop shortcuts: the dashboard, and "Restart Ultrasound Services"
   9. prints the dashboard URLs and the first-login setup token
 """
@@ -272,7 +273,7 @@ def setup_word():
     if "yes" not in r.stdout:
         warn("Microsoft Word is not installed. Reports are still made as Word files, but")
         warn("'PDF / Print' in the dashboard will not work until Word is installed.")
-        return
+        return False
     # Word started by a background task (as SYSTEM) fails to open documents
     # unless these Desktop folders exist
     for folder in (r"C:\Windows\System32\config\systemprofile\Desktop",
@@ -282,6 +283,18 @@ def setup_word():
         except OSError:
             pass
     ok("Word found - PDFs will be made with Word")
+    return True
+
+
+def dashboard_as_user():
+    """
+    Word refuses to start under SYSTEM (COM "Access is denied"), so the
+    dashboard - which makes the PDFs - runs as this Windows user. Asks for
+    the user's password (deploy/dashboard_as_user.ps1).
+    """
+    step("Dashboard as a Windows user (Word does not start for SYSTEM)")
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(ROOT / "deploy" / "dashboard_as_user.ps1")])
 
 
 # ---------------------------------------------------------------------------
@@ -397,8 +410,10 @@ def main():
     setup_firewall(cfg)
     setup_power()
     setup_tesseract()
-    setup_word()
+    word = setup_word()
     register_tasks()
+    if word:
+        dashboard_as_user()
     create_shortcuts()
     finish(cfg)
 

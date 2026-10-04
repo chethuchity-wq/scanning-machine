@@ -216,7 +216,7 @@ What it does, in order:
 | Firewall | Opens port 8000 (dashboard, unless it is for this PC only) and, when Orthanc is on this PC, 4242 (DICOM) — to the clinic LAN and Tailscale (`100.64.0.0/10`) only, never the internet |
 | Power | Disables sleep and hibernate on mains power |
 | Tesseract | Downloads and installs Tesseract when missing, and saves its path in `config_local.py` |
-| Word | Checks Microsoft Word is installed (needed for PDF / Print) and prepares it for the background tasks |
+| Word | Checks Microsoft Word is installed (needed for PDF / Print). Word does not start for the SYSTEM account, so the dashboard task is switched to run as the Windows user: **setup asks for that user's Windows password** |
 | Auto-start | Registers the **Ultrasound Pipeline** and **Ultrasound Dashboard** scheduled tasks and starts them (Part F) |
 | Shortcuts | Puts **Ultrasound Dashboard** and **Restart Ultrasound Services** on the Desktop |
 | Finish | Waits for the dashboard to answer, then prints its URLs (and the first-login setup token when a login is used) |
@@ -422,6 +422,7 @@ bad update on a Friday evening means a weekend of no reports. To roll back, run
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
+| PDF / Print: "Could not create the PDF" | The dashboard runs as SYSTEM, or the Windows password changed | Double-click `C:\scanning-machine\deploy\dashboard_as_user.bat` and enter the Windows password |
 | No reports, scans are in Orthanc | Pipeline crashing or task not running | Read `logs\pipeline.log`. In Task Scheduler check **Ultrasound Pipeline** is Running; re-run `setup.bat` to recreate it |
 | Dashboard does not load | Dashboard crashing, or firewall rule missing | Read `logs\dashboard.log`; re-run `setup.bat` to recreate the task and firewall rule |
 | Dashboard shows no reports, but PDFs exist in `reports\` | Dashboard started from another folder, so it opened a different database | The tasks must run `deploy\service_*.bat`, which change into `C:\scanning-machine`. Re-run `setup.bat` |
