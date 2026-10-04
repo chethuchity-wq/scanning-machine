@@ -40,19 +40,24 @@ scans arrive, no reports are generated, and nobody notices for days.
 
 ## Before you start
 
-### Blocker 1 — push your code to GitHub
+### Blocker 1 — build the release zip
 
-The Kolar machine installs by cloning from GitHub. Your latest work is committed
-locally only. From Bangalore:
+The clinic machine does not need git or GitHub. You send it a zip built from
+your last commit. On your machine:
 
 ```
 cd g:\scanning-machine
-git push -u origin dashboard-and-report-fixes
+git status                      (commit everything first)
+deploy\make_release.bat
 ```
 
-Then either merge it to `master`, or clone that branch by name in Part D.
-Confirm at https://github.com/chethuchity-wq/scanning-machine that the commit is
-actually there before you go further.
+This writes `dist\scanning-machine-<commit>.zip`. It contains only committed
+files, so `config_local.py`, `data\`, `reports\` and `.venv` never leave your
+machine. Uncommitted changes are **not** included; the script warns you if
+there are any.
+
+Copy the zip to the clinic PC — AnyDesk file transfer, a pen drive, or Google
+Drive.
 
 ### The reporting doctor is set per clinic, on the Settings page
 
@@ -157,32 +162,11 @@ From this point on, everything below can be done from Bangalore.
 
 Connect over AnyDesk and work on the Kolar machine's desktop.
 
-### 1. Python
+Python and git do **not** need installing by hand. `setup.bat` (Part D)
+downloads and installs Python 3.11 when no 3.11/3.12 is present, and git is not
+used at all.
 
-Download Python **3.11 or 3.12** from https://www.python.org/downloads/windows/.
-
-Do not take the newest release. 3.11 matches what the project is tested against
-(`Dockerfile` pins `python:3.11-slim`), and very new versions regularly break one
-of the compiled dependencies.
-
-**During installation, tick "Add python.exe to PATH".** If you miss it, nothing
-below works and the fix is a reinstall.
-
-Verify:
-
-```
-python --version
-```
-
-### 2. Git
-
-Install from https://git-scm.com/download/win. Accept all defaults.
-
-```
-git --version
-```
-
-### 3. Orthanc
+### 1. Orthanc
 
 Check first whether the clinic already has it — a machine that is already sending
 DICOM somewhere has an Orthanc or a PACS already.
@@ -198,7 +182,7 @@ curl http://localhost:8042/system
 that is the account holding all the clinic's patient images. The password lives
 in Orthanc's `orthanc.json` configuration file.
 
-### 4. Tesseract (optional)
+### 2. Tesseract (optional)
 
 Only needed if the ultrasound machine burns measurements into the image pixels
 instead of sending Structured Reports. The pipeline works without it.
@@ -208,37 +192,36 @@ If needed: https://github.com/UB-Mannheim/tesseract/wiki, then set
 
 ---
 
-## Part D — Install the pipeline
+## Part D — Run setup.bat
 
-Pick a folder that is **not** under `C:\Program Files` and **not** inside
-OneDrive. OneDrive syncing a folder the pipeline writes to constantly will cause
-file-locking failures.
+1. Right-click the zip → **Extract All**. Extract anywhere, e.g. Downloads.
+2. Open the extracted `scanning-machine` folder and double-click **setup.bat**.
+3. Click **Yes** on the administrator prompt.
 
-```
-cd C:\
-git clone https://github.com/chethuchity-wq/scanning-machine.git
-cd scanning-machine
-```
+It installs to **`C:\scanning-machine`** whichever folder you extracted to — not
+under Program Files, not inside OneDrive. Change `INSTALL_DIR` at the top of
+`setup.bat` if a clinic needs a different drive.
 
-If you did not merge to `master`, check out your branch:
+What it does, in order:
 
-```
-git checkout dashboard-and-report-fixes
-```
+| Step | Detail |
+|---|---|
+| Stop services | Ends the two scheduled tasks if they are running (matters on updates) |
+| Copy files | Copies the program to `C:\scanning-machine`. Never overwrites `config_local.py`, `data\`, `reports\`, `measurements\` or `watch_state.json` |
+| Python | Uses an installed Python 3.11/3.12, otherwise downloads and installs 3.11.9 for all users |
+| Packages | Creates `.venv` and installs `requirements.txt` (needs internet; a few minutes the first time) |
+| Configure | Asks for the Orthanc URL, username and password, clinic name, address and phone, and the healthchecks.io URL, and writes them into `config_local.py`. Tests the Orthanc login immediately and lets you re-enter it if it fails |
+| Firewall | Opens port 8000 (dashboard) and, when Orthanc is on this PC, 4242 (DICOM) — to the clinic LAN and Tailscale (`100.64.0.0/10`) only, never the internet |
+| Power | Disables sleep and hibernate on mains power |
+| Auto-start | Registers the **Ultrasound Pipeline** and **Ultrasound Dashboard** scheduled tasks and starts them (Part F) |
+| Finish | Waits for the dashboard to answer, then prints its URLs and the first-login setup token |
 
-Then run the installer by double-clicking `install.bat`, or:
-
-```
-install.bat
-```
-
-This creates the `.venv` virtual environment, installs dependencies, creates the
-`reports`, `measurements` and `dicom_cache` folders, and copies
-`config_local.example.py` to `config_local.py`.
+Have the information from **Before you start** in front of you when you run it.
+Run it again later and it shows the existing config and asks whether to keep it.
 
 ---
 
-## Part E — Configure
+## Part E — Configuration (done by setup.bat)
 
 > **Speed.** Use `127.0.0.1`, not `localhost`: on Windows "localhost" tries
 > IPv6 first and Orthanc listens on IPv4 only, which costs 2 s on every new
@@ -249,82 +232,36 @@ This creates the `.venv` virtual environment, installs dependencies, creates the
 > than the Affiniti needs. With both, a report is ready about 30 s after the
 > scanner finishes sending.
 
-Open `C:\scanning-machine\config_local.py` in Notepad. Every line is commented out
-by default — uncomment and fill in only what differs from `config.py`.
+`setup.bat` writes `C:\scanning-machine\config_local.py`. To change something
+later, either re-run `setup.bat` and answer **n** to "Keep the existing
+configuration?", or edit the file in Notepad and restart both tasks. Settings it
+does not ask about (such as `TESSERACT_CMD`) can be added to the file by hand —
+re-running setup keeps them.
 
-```python
-# --- Orthanc ---
-ORTHANC_URL = "http://127.0.0.1:8042"     # or the Orthanc machine's LAN IP
-POLL_INTERVAL_SECONDS = 3                 # check for new scans every 3 s
-ORTHANC_USERNAME = "orthanc"
-ORTHANC_PASSWORD = "the-password-you-set"
-
-# --- Clinic details, printed on PDF reports ---
-CLINIC_NAME = "Kolar clinic name"
-CLINIC_ADDRESS = "Full address, Kolar"
-CLINIC_PHONE = "+91-XXXXXXXXXX"
-
-# --- Monitoring (Part I) ---
-HEARTBEAT_URL = "https://hc-ping.com/your-check-uuid"
-```
-
-`config_local.py` is gitignored. It holds the real credentials and is never
-overwritten by `git pull`. This is the only file you edit on the clinic machine.
-
-Confirm the pipeline can reach Orthanc:
+To check Orthanc by hand:
 
 ```
+cd C:\scanning-machine
 run.bat list
 ```
 
-This should print the studies already on the server. If it errors, fix the
-connection now — nothing downstream works until this succeeds.
-
 ---
 
-## Part F — Make it survive a reboot
+## Part F — Surviving a reboot (done by setup.bat)
 
-`run.bat watch` in a console window dies when the window is closed or the machine
-restarts. Kolar loses power regularly, so this step is what decides whether the
-deployment actually works unattended.
+Kolar loses power regularly, so this decides whether the deployment actually
+works unattended. `setup.bat` creates both tasks like this:
 
-### The critical detail: working directory
-
-Every path in `config.py` is **relative** — `reports`, `data/app.db`,
-`watch_state.json`. Both processes must start with `C:\scanning-machine` as their
-working directory.
-
-If you miss this, the failure is quiet and confusing: Task Scheduler defaults to
-`C:\Windows\System32`, so the pipeline writes reports into System32 and the
-dashboard creates a second, permanently empty database. The dashboard will look
-like it is working and show no reports at all.
-
-### Task 1 — the pipeline
-
-Open **Task Scheduler** → **Create Task** (not "Create Basic Task").
-
-- **General** tab: name it `Ultrasound Pipeline`. Select **Run whether user is
-  logged on or not**. Tick **Run with highest privileges**.
-- **Triggers** tab: New → Begin the task **At startup**. Tick **Delay task for: 1
-  minute**, so Orthanc is up before the pipeline tries to connect.
-- **Actions** tab: New → Start a program.
-  - Program/script: `C:\scanning-machine\run.bat`
-  - Add arguments: `watch`
-  - **Start in: `C:\scanning-machine`**  ← do not leave this blank
-- **Settings** tab: tick **If the task fails, restart every** 1 minute, up to 3
-  times. Untick **Stop the task if it runs longer than**, since this task is meant
-  to run forever.
-
-### Task 2 — the dashboard
-
-Create a second task the same way, named `Ultrasound Dashboard`:
-
-- **Actions** → Start a program:
-  - Program/script: `C:\scanning-machine\.venv\Scripts\python.exe`
-  - Add arguments: `-m uvicorn webapp.main:app --host 0.0.0.0 --port 8000`
-  - **Start in: `C:\scanning-machine`**
-
-Start both tasks now (right-click → Run) rather than waiting for a reboot.
+- run **at startup** (1 minute delay, so Orthanc is up first) as **SYSTEM**, so
+  nobody needs to log in
+- **no time limit** — Task Scheduler's default kills a task after 3 days
+- Task Scheduler restarts a failed task, and the wrapper scripts
+  `deploy\service_pipeline.bat` / `deploy\service_dashboard.bat` also restart the
+  Python process 30 seconds after it exits
+- each wrapper first changes into `C:\scanning-machine`. Every path in
+  `config.py` is relative; started from `C:\Windows\System32` (Task Scheduler's
+  default) the dashboard would open a second, empty database and show no reports
+- output goes to `C:\scanning-machine\logs\pipeline.log` and `dashboard.log`
 
 ### Then actually test it
 
@@ -340,10 +277,9 @@ Wait three minutes, reconnect, and check the dashboard responds.
 ### Docker alternative
 
 If the clinic PC has Docker Desktop, `deploy.bat` runs both services with
-`restart: unless-stopped` and handles all of the above. It puts the dashboard on
-port **8080** instead of 8000. On a typical clinic Windows PC, Docker Desktop is
-usually more weight than it is worth — the Task Scheduler route above is lighter
-and easier to debug remotely.
+`restart: unless-stopped`. It puts the dashboard on port **8080** instead of
+8000. On a typical clinic Windows PC, Docker Desktop is usually more weight than
+it is worth — `setup.bat` is lighter and easier to debug remotely.
 
 ---
 
@@ -352,8 +288,8 @@ and easier to debug remotely.
 On first start the dashboard has no accounts, and registration is protected by a
 setup token so that whoever reaches the page first cannot claim the admin account.
 
-Because the dashboard runs as a background task, you cannot see the token printed
-in a console. Read it from the file instead:
+`setup.bat` prints the token at the end. If you missed it, read it from the
+file:
 
 ```
 type C:\scanning-machine\data\setup_token.txt
@@ -436,8 +372,9 @@ cannot send you an alert. So it pings an outside service on every poll cycle, an
    minute grace works well.
 3. Set the notification channel to something you will actually see — email,
    Telegram, or SMS.
-4. Paste the check's ping URL into `HEARTBEAT_URL` in `config_local.py`.
-5. Restart the pipeline task.
+4. Paste the check's ping URL when `setup.bat` asks for it (or into
+   `HEARTBEAT_URL` in `config_local.py`).
+5. Restart the pipeline task (or re-run `setup.bat`).
 6. Confirm the check turns green in the healthchecks.io dashboard, then stop the
    task and confirm you receive the alert. **Test the alarm**, do not assume it.
 
@@ -445,27 +382,23 @@ cannot send you an alert. So it pings an outside service on every poll cycle, an
 
 ## Part J — Updating from Bangalore later
 
-Once Tailscale is up, updates do not need a trip.
+Once AnyDesk is up, updates do not need a trip.
 
-1. Commit and push from Bangalore.
-2. Connect over AnyDesk (or open a terminal over Tailscale) and run:
+1. Commit, then run `deploy\make_release.bat` on your machine.
+2. Copy the new zip to the clinic PC over AnyDesk, extract it, and double-click
+   `setup.bat`. It stops both tasks, copies the new code over
+   `C:\scanning-machine`, installs any new packages and starts the tasks again.
+   Answer **Y** to keep the existing configuration.
+3. Check the version printed at the top of setup matches your commit, then
+   verify with a re-sent study that reports are still generated.
 
-```
-cd C:\scanning-machine
-git pull
-.venv\Scripts\activate.bat
-pip install -r requirements.txt
-```
+`config_local.py`, `data\`, `reports\` and `watch_state.json` are never
+overwritten, so an update never touches the clinic's credentials, database or
+generated reports.
 
-3. Restart both tasks in Task Scheduler.
-4. Verify with a re-sent study that reports are still generated.
-
-`config_local.py`, `data\`, `reports\` and `watch_state.json` are all gitignored,
-so `git pull` never touches the clinic's credentials, database or generated
-reports.
-
-**Do a pull during clinic hours only when someone can tell you if it broke.** A
-bad update on a Friday evening means a weekend of no reports.
+**Update during clinic hours only, when someone can tell you if it broke.** A
+bad update on a Friday evening means a weekend of no reports. To roll back, run
+`setup.bat` from the previous zip, so keep the last one or two.
 
 ---
 
@@ -473,8 +406,9 @@ bad update on a Friday evening means a weekend of no reports.
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| No reports, scans are in Orthanc | Pipeline task not running | Task Scheduler → check Last Run Result. Run it manually with `run.bat watch` and read the console |
-| Dashboard shows no reports, but PDFs exist in `reports\` | Task's **Start in** is not set, so it opened a different database | Fix **Start in** to `C:\scanning-machine` on both tasks, restart |
+| No reports, scans are in Orthanc | Pipeline crashing or task not running | Read `logs\pipeline.log`. In Task Scheduler check **Ultrasound Pipeline** is Running; re-run `setup.bat` to recreate it |
+| Dashboard does not load | Dashboard crashing, or firewall rule missing | Read `logs\dashboard.log`; re-run `setup.bat` to recreate the task and firewall rule |
+| Dashboard shows no reports, but PDFs exist in `reports\` | Dashboard started from another folder, so it opened a different database | The tasks must run `deploy\service_*.bat`, which change into `C:\scanning-machine`. Re-run `setup.bat` |
 | `run.bat list` cannot connect | Wrong Orthanc URL, password, or Orthanc is down | `curl http://localhost:8042/system`, then re-check `config_local.py` |
 | Nothing arrives in Orthanc from the machine | Ultrasound DICOM destination wrong, or firewall | Confirm the **LAN** IP and port 4242; allow Orthanc through Windows Firewall |
 | Pipeline refuses to start, complains about the watch state file | `watch_state.json` was corrupted by a power cut | Deliberate — starting from zero would regenerate reports over every past study. Follow the recovery steps printed in the error |
@@ -488,7 +422,8 @@ Useful commands, run from `C:\scanning-machine`:
 ```
 run.bat list                       # is Orthanc reachable?
 type data\setup_token.txt          # first-run dashboard token
-git log --oneline -3               # which version is deployed?
+type VERSION                       # which version is deployed?
+type logs\pipeline.log             # what has the pipeline been doing?
 ```
 
 ---
@@ -531,7 +466,7 @@ Print this and tick it off.
 
 ```
 Before travelling
-  [ ] Branch pushed to GitHub and confirmed visible
+  [ ] Everything committed, deploy\make_release.bat run, zip in hand
   [ ] Kolar doctor's name + qualification (exact spelling) in hand
   [ ] Orthanc IP, port, username, password in hand
   [ ] Clinic name, address, phone in hand
@@ -541,23 +476,16 @@ Before travelling
 At the machine (one visit)
   [ ] Tailscale installed, unattended mode on, IP noted
   [ ] AnyDesk installed, unattended access on, ID and password noted
-  [ ] Sleep disabled
   [ ] UPS checked
 
 Install
-  [ ] Python 3.11 or 3.12, added to PATH
-  [ ] Git installed
   [ ] Orthanc running, default password changed
-  [ ] Repository cloned, correct branch checked out
-  [ ] install.bat completed
-  [ ] config_local.py filled in
-  [ ] run.bat list returns studies
+  [ ] Zip extracted, setup.bat run, Orthanc check passed
+  [ ] Admin account created with the setup token, staff account created
+  [ ] Doctor name + qualification entered in Settings
 
 Run
-  [ ] Pipeline scheduled task created, Start in set
-  [ ] Dashboard scheduled task created, Start in set
-  [ ] Machine rebooted and both came back automatically
-  [ ] Admin account created, staff account created
+  [ ] Machine rebooted and the dashboard came back automatically
 
 Verify
   [ ] Ultrasound machine sends to Orthanc
