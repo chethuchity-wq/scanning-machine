@@ -647,6 +647,32 @@ def abdomen_pelvis_male() -> Document:
     ])
 
 
+BREAST_NORMAL = [
+    "The nipple, retro areolar, axillary tail of Spence, intermammary breast tissue appears normal.",
+    "No abnormal calcification seen.",
+    "No architectural distortion.",
+]
+
+
+def breast_scan() -> Document:
+    # Laid out like the hand-edited forms (2026-10-04): a blank line under the
+    # title and "Clinical findings:" as the findings heading
+    doc = new_doc()
+    title(doc, "ULTRASOUND BREASTS")
+    doc.add_paragraph()
+    # Breast scans are done for men too (gynecomastia): sex from the scanner
+    patient_box(doc, "{{sex}}", "{{clinical_data}}", lmp=False)
+    heading(doc, "Clinical findings:")
+    findings(doc, [
+        ("Right breast", BREAST_NORMAL),
+        ("Left breast", BREAST_NORMAL),
+    ])
+    impression(doc, [])
+    note(doc, [STANDARD_NOTE], label="Note: ")
+    signature(doc)
+    return doc
+
+
 FORMS = {
     "early_pregnancy": early_pregnancy,
     "nt_scan": nt_scan,
@@ -655,11 +681,17 @@ FORMS = {
     "follicular_study": follicular_study,
     "abdomen_pelvis_female": abdomen_pelvis_female,
     "abdomen_pelvis_male": abdomen_pelvis_male,
+    "breast_scan": breast_scan,
 }
 
 
 def main() -> None:
-    for name, build in FORMS.items():
+    # "build_templates.py breast_scan" builds only the named forms, leaving
+    # forms that were edited by hand in Word untouched
+    import sys
+    names = sys.argv[1:] or list(FORMS)
+    for name in names:
+        build = FORMS[name]
         path = TEMPLATE_DIR / f"{name}.docx"
         build().save(path)
         print(f"Wrote {path}")

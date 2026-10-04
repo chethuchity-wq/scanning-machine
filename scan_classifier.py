@@ -296,6 +296,9 @@ def _classify_from_exam(ds: Dataset, measurements: list[dict]) -> Optional[tuple
     exam = _tag_text(ds, EXAM_TYPE_TAG)
     preset = _tag_text(ds, PRESET_TAG)
 
+    # Breast / small-parts breast preset (e.g. "BREAST", "SMP_BREAST")
+    if exam == "BREAST" or "BREAST" in preset:
+        return "breast_scan", 0.90, f"exam:{exam or preset}"
     if preset == "GYN_FERTILITY":
         return "follicular_study", 0.90, "exam:GYN_FERTILITY"
     if preset.startswith("GYN"):

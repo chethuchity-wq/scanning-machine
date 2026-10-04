@@ -296,6 +296,7 @@ SCAN_TYPE_NAMES = {
     "follicular_study": "Follicular study",
     "abdomen_pelvis_female": "Abdomen & pelvis (F)",
     "abdomen_pelvis_male": "Abdomen & pelvis (M)",
+    "breast_scan": "Breast",
 }
 STATUS_NAMES = {
     "draft": "Awaiting doctor",

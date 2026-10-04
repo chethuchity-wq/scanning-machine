@@ -971,6 +971,12 @@ def generate_abdomen_pelvis_male_report(data: dict) -> Path:
 # Public API
 # ---------------------------------------------------------------------------
 
+def generate_breast_scan_report(data: dict) -> Path:
+    """The breast form exists only as the clinic template (templates/breast_scan.docx)."""
+    raise FileNotFoundError(
+        f"Missing {TEMPLATE_DIR / 'breast_scan.docx'} - run: python tools/build_templates.py breast_scan")
+
+
 SCAN_GENERATORS = {
     "early_pregnancy": generate_early_pregnancy_report,
     "nt_scan": generate_nt_scan_report,
@@ -979,6 +985,7 @@ SCAN_GENERATORS = {
     "follicular_study": generate_follicular_study_report,
     "abdomen_pelvis_female": generate_abdomen_pelvis_female_report,
     "abdomen_pelvis_male": generate_abdomen_pelvis_male_report,
+    "breast_scan": generate_breast_scan_report,
 }
 
 

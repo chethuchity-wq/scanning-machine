@@ -470,6 +470,8 @@ def _build_docx_data(
         "_doctor_qual": clinic_info.get("doctor_qual", ""),
         # sex drives declaration pronoun: "F" -> "her", "M" -> "his"
         "_sex": patient_info.get("sex", "F"),
+        # Printed by forms for either sex (breast): "F" / "M"
+        "sex": patient_info.get("sex", ""),
         "_images": images or [],
         # Where the Word report is saved (dashboard Settings); blank = locally
         "_report_folder": clinic_info.get("report_folder", ""),
