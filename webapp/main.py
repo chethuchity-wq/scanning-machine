@@ -403,7 +403,11 @@ def day_status(day: str, user: dict = Depends(require_login)):
     shown = _parse_day(day)
     if shown is None:
         raise HTTPException(status_code=400, detail="Bad date")
-    return {"signature": db.day_signature(user["clinic_id"], shown.isoformat())}
+    return {
+        "signature": db.day_signature(user["clinic_id"], shown.isoformat()),
+        # The PC's date: after midnight the open "today" page moves to the new day
+        "today": date.today().isoformat(),
+    }
 
 
 def _study_or_404(user: dict, study_id: int) -> dict:

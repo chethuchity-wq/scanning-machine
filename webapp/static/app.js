@@ -46,7 +46,8 @@
   }
 
   // Today's day page: check every 5 s for new reports and reload when one
-  // arrives (not on a timer, so nothing jumps while you read)
+  // arrives (not on a timer, so nothing jumps while you read). After
+  // midnight it moves on to the new day.
   var live = document.querySelector("[data-live]");
   if (live) {
     setInterval(function () {
@@ -54,11 +55,63 @@
       fetch("/day-status?day=" + live.dataset.live, { cache: "no-store" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
-          if (d && d.signature !== live.dataset.signature) window.location.reload();
+          if (d && d.today && d.today !== live.dataset.live) window.location = "/";
+          else if (d && d.signature !== live.dataset.signature) window.location.reload();
         })
         .catch(function () {});
     }, 5000);
   }
+
+  // PDF / Print: the PDF is loaded into a hidden frame on this page and the
+  // browser's print window opens over it, so there is no tab to close after
+  // printing. Ctrl/Shift/middle-click still opens the PDF in a new tab.
+  var printFrame = null;
+  function printPdf(link) {
+    if (link.classList.contains("busy")) return;
+    var label = link.textContent;
+    link.classList.add("busy");
+    link.textContent = "Preparing…";
+    var ready = window.__beforePrint ? window.__beforePrint() : Promise.resolve(true);
+    ready.then(function (ok) {
+      if (!ok) return;
+      return fetch(link.href, { cache: "no-store" }).then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (d) {
+            throw new Error(d.detail || "Could not create the PDF");
+          });
+        }
+        return res.blob();
+      }).then(function (blob) {
+        if (printFrame) { URL.revokeObjectURL(printFrame.src); printFrame.remove(); }
+        printFrame = document.createElement("iframe");
+        // Not display:none - the browser does not load a PDF in a hidden frame
+        printFrame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0";
+        return new Promise(function (resolve) {
+          printFrame.addEventListener("load", function () {
+            setTimeout(function () {
+              printFrame.contentWindow.focus();
+              printFrame.contentWindow.print();
+              resolve();
+            }, 300);
+          });
+          printFrame.src = URL.createObjectURL(blob);
+          document.body.appendChild(printFrame);
+        });
+      });
+    }).catch(function (err) {
+      window.alert(err.message);
+    }).then(function () {
+      link.classList.remove("busy");
+      link.textContent = label;
+    });
+  }
+  document.querySelectorAll("a.print-pdf").forEach(function (link) {
+    link.addEventListener("click", function (e) {
+      if (e.ctrlKey || e.shiftKey || e.metaKey || e.button !== 0) return;
+      e.preventDefault();
+      printPdf(link);
+    });
+  });
 
   var ed = document.getElementById("editor");
   if (!ed) return;
@@ -70,7 +123,6 @@
   // ---------------------------------------------------------------------------
   var saveBtn = document.getElementById("save-btn");
   var stateEl = document.getElementById("save-state");
-  var pdfBtn = document.getElementById("pdf-btn");
   var version = ed.dataset.version;
   var dirty = false;
   var saving = false;
@@ -225,15 +277,7 @@
   });
 
   // PDF / Print: save first, so the PDF is made from what is on screen
-  pdfBtn.addEventListener("click", function (e) {
-    if (!dirty) return;
-    e.preventDefault();
-    var win = window.open("about:blank", "_blank");
-    save().then(function (ok) {
-      if (ok && win) win.location = pdfBtn.href;
-      else if (win) win.close();
-    });
-  });
+  window.__beforePrint = function () { return dirty ? save() : Promise.resolve(true); };
 
   // ---------------------------------------------------------------------------
   // Page markers. The sheet is shown as one continuous page; on paper every

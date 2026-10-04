@@ -22,7 +22,7 @@
               </a>
               {% if is_open %}
               <ol class="patients">
-                {% for p in day_patients %}
+                {% for p in day_patients|reverse %}
                 <li>
                   <a href="/study/{{ p.study_id }}" class="{{ 'active' if study and study.study_id == p.study_id }}" title="{{ p.scan_name }} - {{ status_names[p.document_status] }}">
                     <span class="dot dot-{{ p.document_status }}{{ ' dot-flag' if p.needs_review }}"></span>

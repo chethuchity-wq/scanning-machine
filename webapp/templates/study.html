@@ -52,14 +52,14 @@
         <span id="save-state" class="save-state">All changes saved</span>
         <span id="page-count" class="page-count" title="Where Word will start each new page is marked on the sheet"></span>
         <span class="spacer"></span>
-        <a class="btn btn-light" id="pdf-btn" href="/reports/{{ study.report_id }}/pdf" target="_blank" title="Print or save as PDF - made from the saved Word report">PDF / Print</a>
+        <a class="btn btn-light print-pdf" id="pdf-btn" href="/reports/{{ study.report_id }}/pdf" target="_blank" title="Print - choose &quot;Save as PDF&quot; in the print window to keep a PDF. Made from the saved Word report">PDF / Print</a>
         <a class="btn btn-light" href="/reports/{{ study.report_id }}/download" title="Download the Word file">Word file</a>
       </div>
       {% else %}
       <div class="toolbar">
         <span class="hint">Scan type not identified - no Word report was made. This is the measurements summary.</span>
         <span class="spacer"></span>
-        <a class="btn btn-light" href="/reports/{{ study.report_id }}/pdf" target="_blank">Open PDF</a>
+        <a class="btn btn-light print-pdf" href="/reports/{{ study.report_id }}/pdf" target="_blank">Open PDF</a>
       </div>
       {% endif %}
     </header>

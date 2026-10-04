@@ -36,7 +36,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for s in studies %}
+        {% for s in studies|reverse %}
         <tr class="clickable {{ 'needs-review' if s.needs_review }}" data-href="/study/{{ s.study_id }}">
           <td class="num">{{ s.number }}</td>
           <td>
@@ -50,9 +50,9 @@
           <td class="actions">
             {% if s.report_type == "docx" %}
               <a class="btn" href="/study/{{ s.study_id }}">Open</a>
-              <a class="btn btn-light" href="/reports/{{ s.report_id }}/pdf" target="_blank" title="Made from the Word report when clicked - may take a few seconds">PDF</a>
+              <a class="btn btn-light print-pdf" href="/reports/{{ s.report_id }}/pdf" target="_blank" title="Made from the Word report when clicked - may take a few seconds">PDF</a>
             {% else %}
-              <a class="btn btn-light" href="/reports/{{ s.report_id }}/pdf" target="_blank">Measurements PDF</a>
+              <a class="btn btn-light print-pdf" href="/reports/{{ s.report_id }}/pdf" target="_blank">Measurements PDF</a>
             {% endif %}
           </td>
         </tr>
