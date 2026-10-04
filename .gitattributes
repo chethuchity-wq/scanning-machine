@@ -12,3 +12,7 @@ Dockerfile export-ignore
 docker-compose.yml export-ignore
 deploy.bat export-ignore
 install.bat export-ignore
+
+# Binary documents: never convert line endings
+*.pdf binary
+*.docx binary
