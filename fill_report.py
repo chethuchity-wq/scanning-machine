@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -40,9 +41,13 @@ REFERRING_DEFAULT = getattr(config, "REFERRING_DEFAULT", "")
 DOCTOR_BLANK = "____________________"
 OUTPUT_DIR = Path("reports/filled")
 
-# The clinic's own report formats, one per scan type (templates/<scan_type>.docx).
-# Blanks are marked {{field}}; see _fill_template.
+# The report forms, one Word file per scan type, blanks marked {{field}} (see
+# _fill_template). The program ships the default forms in templates/; each
+# installation uses its own copies in data/forms (config.FORMS_DIR), made from
+# the defaults the first time they are needed. The clinic edits those in Word,
+# and an update - which replaces templates/ - never touches them.
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+FORMS_DIR = Path(__file__).resolve().parent / getattr(config, "FORMS_DIR", "data/forms")
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 _DATE_FIELDS = ("date", "lmp", "edd_scan", "edd_lmp")
 # A value the scan didn't provide prints as a fill-in line ("Normal in size
@@ -261,19 +266,28 @@ def _fill_template(template: Path, d: dict) -> Document:
     return doc
 
 
+def form_path(scan_type: str) -> Path:
+    """This installation's form for `scan_type` (data/forms), copied from the default the first time."""
+    form = FORMS_DIR / f"{scan_type}.docx"
+    if not form.exists():
+        default = TEMPLATE_DIR / f"{scan_type}.docx"
+        if not default.exists():
+            raise FileNotFoundError(
+                f"Missing {default} - run: python tools/build_templates.py {scan_type}")
+        FORMS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(default, form)
+    return form
+
+
 def generate_report(scan_type: str, data: dict) -> Path:
     """
-    Fill the clinic's form for `scan_type` (templates/<scan_type>.docx) with
+    Fill the clinic's form for `scan_type` (data/forms/<scan_type>.docx) with
     `data` (patient details and measurements), add the scan images, save it
     and return the path of the .docx.
     """
     if scan_type not in SCAN_TYPES:
         raise ValueError(f"Unknown scan type '{scan_type}'. Valid types: {list(SCAN_TYPES)}")
-    template = TEMPLATE_DIR / f"{scan_type}.docx"
-    if not template.exists():
-        raise FileNotFoundError(
-            f"Missing {template} - run: python tools/build_templates.py {scan_type}")
-    doc = _fill_template(template, data)
+    doc = _fill_template(form_path(scan_type), data)
     _add_images_section(doc, data.get("_images"))
     return _save(doc, data.get("patient_name", "patient"), scan_type, data.get("date", ""),
                  data.get("_report_folder", ""))

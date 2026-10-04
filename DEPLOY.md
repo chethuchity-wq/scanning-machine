@@ -182,13 +182,15 @@ curl http://localhost:8042/system
 that is the account holding all the clinic's patient images. The password lives
 in Orthanc's `orthanc.json` configuration file.
 
-### 2. Tesseract (optional)
+### 2. Microsoft Word
 
-Only needed if the ultrasound machine burns measurements into the image pixels
-instead of sending Structured Reports. The pipeline works without it.
+The dashboard's **PDF / Print** turns each Word report into a PDF with Word
+itself, so the printout matches the Word file exactly. Word must be installed
+and activated on the clinic PC. Without it, reports are still made as Word
+files, but printing from the dashboard does not work.
 
-If needed: https://github.com/UB-Mannheim/tesseract/wiki, then set
-`TESSERACT_CMD` in `config_local.py` to the installed `tesseract.exe` path.
+Tesseract (reads the values printed on the scan images) needs no manual step:
+`setup.bat` installs it when it is missing.
 
 ---
 
@@ -211,10 +213,13 @@ What it does, in order:
 | Python | Uses an installed Python 3.11/3.12, otherwise downloads and installs 3.11.9 for all users |
 | Packages | Creates `.venv` and installs `requirements.txt` (needs internet; a few minutes the first time) |
 | Configure | Asks for the Orthanc URL, username and password, clinic name, address and phone, and the healthchecks.io URL, and writes them into `config_local.py`. Tests the Orthanc login immediately and lets you re-enter it if it fails |
-| Firewall | Opens port 8000 (dashboard) and, when Orthanc is on this PC, 4242 (DICOM) — to the clinic LAN and Tailscale (`100.64.0.0/10`) only, never the internet |
+| Firewall | Opens port 8000 (dashboard, unless it is for this PC only) and, when Orthanc is on this PC, 4242 (DICOM) — to the clinic LAN and Tailscale (`100.64.0.0/10`) only, never the internet |
 | Power | Disables sleep and hibernate on mains power |
+| Tesseract | Downloads and installs Tesseract when missing, and saves its path in `config_local.py` |
+| Word | Checks Microsoft Word is installed (needed for PDF / Print) and prepares it for the background tasks |
 | Auto-start | Registers the **Ultrasound Pipeline** and **Ultrasound Dashboard** scheduled tasks and starts them (Part F) |
-| Finish | Waits for the dashboard to answer, then prints its URLs and the first-login setup token |
+| Shortcuts | Puts **Ultrasound Dashboard** and **Restart Ultrasound Services** on the Desktop |
+| Finish | Waits for the dashboard to answer, then prints its URLs (and the first-login setup token when a login is used) |
 
 Have the information from **Before you start** in front of you when you run it.
 Run it again later and it shows the existing config and asks whether to keep it.
@@ -395,6 +400,17 @@ Once AnyDesk is up, updates do not need a trip.
 `config_local.py`, `data\`, `reports\` and `watch_state.json` are never
 overwritten, so an update never touches the clinic's credentials, database or
 generated reports.
+
+**The clinic's report forms** are in `C:\scanning-machine\data\forms` — one Word
+file per report type, made from the program's default forms (`templates\`) the
+first time each is needed. The clinic edits those in Word, and updates never
+replace them. A new default form (a new report type, say) reaches a clinic by
+itself; an improved version of an existing one does not — copy it into
+`data\forms` by hand if the clinic wants it.
+
+If something stops working at the clinic, the **Restart Ultrasound Services**
+icon on the Desktop restarts Orthanc, the pipeline and the dashboard and shows
+which of them are running.
 
 **Update during clinic hours only, when someone can tell you if it broke.** A
 bad update on a Friday evening means a weekend of no reports. To roll back, run

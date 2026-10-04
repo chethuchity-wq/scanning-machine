@@ -9,6 +9,10 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $tasks = "Ultrasound Pipeline", "Ultrasound Dashboard"
+# Logs: logs\ in a setup.bat installation, data\ in older ones
+$logDir = if (Test-Path "logs\pipeline.log") { "logs" } else { "data" }
+$pipelineLog = "$logDir\pipeline.log"
+$dashboardLog = "$logDir\dashboard.log"
 
 function Say($text, $color = "Gray") { Write-Host $text -ForegroundColor $color }
 
@@ -61,13 +65,13 @@ $dashboardOk = Wait-Url "http://localhost:8000/" 90
 
 # The pipeline is up once its log says it is watching Orthanc again
 $pipelineOk = $false
-$logStart = (Get-Item "data\pipeline.log" -ErrorAction SilentlyContinue).Length
+$logStart = (Get-Item $pipelineLog -ErrorAction SilentlyContinue).Length
 for ($i = 0; $i -lt 90 -and -not $pipelineOk; $i++) {
     Start-Sleep -Seconds 1
     $running = (Get-ScheduledTask -TaskName "Ultrasound Pipeline").State -eq "Running"
-    $log = Get-Content "data\pipeline.log" -Tail 15 -ErrorAction SilentlyContinue
+    $log = Get-Content $pipelineLog -Tail 15 -ErrorAction SilentlyContinue
     $pipelineOk = $running -and ($log -match "Watching Orthanc") -and
-        ((Get-Item "data\pipeline.log").Length -ne $logStart)
+        ((Get-Item $pipelineLog).Length -ne $logStart)
 }
 
 # --- Report -----------------------------------------------------------------
@@ -76,8 +80,8 @@ Say "=== Status ===" Cyan
 $all = $true
 foreach ($item in @(
         @("Orthanc (scanner receiver)", $orthancOk, "service 'Orthanc' - check Services, or its log in C:\Program Files\Orthanc Server\Logs"),
-        @("Pipeline (makes reports)", $pipelineOk, "see data\pipeline.log"),
-        @("Dashboard (localhost:8000)", $dashboardOk, "see data\dashboard.log"))) {
+        @("Pipeline (makes reports)", $pipelineOk, "see $pipelineLog"),
+        @("Dashboard (localhost:8000)", $dashboardOk, "see $dashboardLog"))) {
     if ($item[1]) { Say ("  OK      " + $item[0]) Green }
     else { Say ("  FAILED  " + $item[0] + "  -> " + $item[2]) Red; $all = $false }
 }
@@ -87,7 +91,7 @@ if ($all) {
     Start-Process "http://localhost:8000/"
 } else {
     Say "Last lines of the logs:" Yellow
-    foreach ($f in "data\pipeline.log", "data\dashboard.log") {
+    foreach ($f in $pipelineLog, $dashboardLog) {
         Say "--- $f" Yellow
         Get-Content $f -Tail 8 -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
     }

@@ -34,6 +34,10 @@ HEARTBEAT_URL = ""                   # Dead-man's-switch ping URL (e.g. healthch
 # Dashboard (webapp/)
 # ---------------------------------------------------------------------------
 DB_PATH = "data/app.db"                        # Worklist/clinic-settings database
+# This clinic's Word report forms - edit these in Word. Made from the program's
+# default forms (templates/) the first time each is needed; updates never
+# replace them.
+FORMS_DIR = "data/forms"
 # Set False where the dashboard is only ever opened on the clinic PC itself:
 # no login page or accounts, and it then refuses every connection that isn't
 # from this machine (patient reports must not be open to the whole LAN).

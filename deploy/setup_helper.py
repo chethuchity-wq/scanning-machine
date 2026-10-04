@@ -10,13 +10,20 @@ dependencies are installed. Safe to re-run: every step is idempotent.
   3. firewall rules (dashboard 8000; DICOM 4242 when Orthanc is local),
      limited to the clinic LAN and Tailscale
   4. disables sleep on AC power
-  5. registers the "Ultrasound Pipeline" and "Ultrasound Dashboard"
+  5. Tesseract (reads the values printed on the scan images): installed if
+     missing, and its path saved in config_local.py
+  6. Microsoft Word (turns the Word reports into PDFs for printing): checked,
+     and prepared for use by the background tasks
+  7. registers the "Ultrasound Pipeline" and "Ultrasound Dashboard"
      scheduled tasks (start at boot as SYSTEM, no time limit, restart on
      failure) and starts them
-  6. prints the dashboard URLs and the first-login setup token
+  8. Desktop shortcuts: the dashboard, and "Restart Ultrasound Services"
+  9. prints the dashboard URLs and the first-login setup token
 """
 
+import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -36,6 +43,11 @@ TASKS = {
     "Ultrasound Pipeline": ROOT / "deploy" / "service_pipeline.bat",
     "Ultrasound Dashboard": ROOT / "deploy" / "service_dashboard.bat",
 }
+
+TESSERACT_VERSION = "5.4.0.20240606"
+TESSERACT_URL = ("https://github.com/UB-Mannheim/tesseract/releases/download/"
+                 f"v{TESSERACT_VERSION}/tesseract-ocr-w64-setup-{TESSERACT_VERSION}.exe")
+TESSERACT_EXE = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 
 # Clinic LAN + Tailscale's address range. The dashboard is plain HTTP, so it
 # must never be reachable from the internet (see DEPLOY.md, Part A).
@@ -147,7 +159,8 @@ def configure():
         return cfg
 
     print("    Press Enter to accept the value in [brackets].")
-    url_default = "http://localhost:8042" if not CONFIG_LOCAL.exists() else cfg.ORTHANC_URL
+    # 127.0.0.1, not localhost: Windows tries IPv6 first for "localhost" (2 s per connection)
+    url_default = "http://127.0.0.1:8042" if not CONFIG_LOCAL.exists() else cfg.ORTHANC_URL
     while True:
         url = ask("Orthanc URL", url_default)
         username = ask("Orthanc username", cfg.ORTHANC_USERNAME)
@@ -162,7 +175,12 @@ def configure():
             break
         url_default = url
 
-    values = {"ORTHANC_URL": url, "ORTHANC_USERNAME": username, "ORTHANC_PASSWORD": password}
+    values = {"ORTHANC_URL": url, "ORTHANC_USERNAME": username, "ORTHANC_PASSWORD": password,
+              "POLL_INTERVAL_SECONDS": 3}
+    print("    Is the dashboard used only on this PC? Then it needs no login, and other")
+    print("    computers cannot open it. Answer n if staff open it from other PCs.")
+    values["DASHBOARD_LOGIN_REQUIRED"] = not yes(
+        "Dashboard used only on this PC (no login)?", not getattr(cfg, "DASHBOARD_LOGIN_REQUIRED", True))
     print("    Clinic details printed on PDF reports:")
     values["CLINIC_NAME"] = ask("Clinic name", cfg.CLINIC_NAME)
     values["CLINIC_ADDRESS"] = ask("Clinic address", cfg.CLINIC_ADDRESS)
@@ -200,7 +218,10 @@ def firewall_rule(name, port):
 
 def setup_firewall(cfg):
     step("Firewall")
-    firewall_rule("Ultrasound Dashboard", DASHBOARD_PORT)
+    if getattr(cfg, "DASHBOARD_LOGIN_REQUIRED", True):
+        firewall_rule("Ultrasound Dashboard", DASHBOARD_PORT)
+    else:
+        ok("Dashboard is for this PC only - no firewall opening for it")
     if urlparse(cfg.ORTHANC_URL).hostname in ("localhost", "127.0.0.1"):
         # The ultrasound machine sends DICOM to this PC
         firewall_rule("Orthanc DICOM", 4242)
@@ -215,7 +236,56 @@ def setup_power():
 
 
 # ---------------------------------------------------------------------------
-# 5. Scheduled tasks
+# 5-6. Tesseract + Word
+# ---------------------------------------------------------------------------
+
+def find_tesseract():
+    found = shutil.which("tesseract")
+    if found:
+        return Path(found)
+    return TESSERACT_EXE if TESSERACT_EXE.exists() else None
+
+
+def setup_tesseract():
+    step("Tesseract (reads the values printed on the scan images)")
+    exe = find_tesseract()
+    if exe is None:
+        print(f"    Not installed - downloading Tesseract {TESSERACT_VERSION} (about 50 MB)...")
+        installer = Path(os.environ.get("TEMP", ".")) / "tesseract-setup.exe"
+        r = subprocess.run(["curl.exe", "-L", "--fail", "--silent", "--show-error",
+                            "-o", str(installer), TESSERACT_URL], capture_output=True, text=True)
+        if r.returncode == 0:
+            subprocess.run([str(installer), "/S"], capture_output=True)
+            installer.unlink(missing_ok=True)
+            exe = find_tesseract()
+    if exe is None:
+        warn("Tesseract is not installed - values on the scan images will not be read.")
+        warn("Install it from https://github.com/UB-Mannheim/tesseract/wiki and run setup.bat again.")
+        return
+    set_config_values({"TESSERACT_CMD": str(exe)})
+    ok(f"Tesseract: {exe}")
+
+
+def setup_word():
+    step("Microsoft Word (makes the PDFs for printing)")
+    r = run_powershell("if (Test-Path 'Registry::HKEY_CLASSES_ROOT\\Word.Application') { 'yes' }")
+    if "yes" not in r.stdout:
+        warn("Microsoft Word is not installed. Reports are still made as Word files, but")
+        warn("'PDF / Print' in the dashboard will not work until Word is installed.")
+        return
+    # Word started by a background task (as SYSTEM) fails to open documents
+    # unless these Desktop folders exist
+    for folder in (r"C:\Windows\System32\config\systemprofile\Desktop",
+                   r"C:\Windows\SysWOW64\config\systemprofile\Desktop"):
+        try:
+            Path(folder).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+    ok("Word found - PDFs will be made with Word")
+
+
+# ---------------------------------------------------------------------------
+# 7. Scheduled tasks
 # ---------------------------------------------------------------------------
 
 def register_tasks():
@@ -239,7 +309,31 @@ Start-ScheduledTask -TaskName {ps_quote(name)}
 
 
 # ---------------------------------------------------------------------------
-# 6. Dashboard check + first login
+# 8. Desktop shortcuts
+# ---------------------------------------------------------------------------
+
+def create_shortcuts():
+    step("Desktop shortcuts")
+    script = f"""
+$desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$shell = New-Object -ComObject WScript.Shell
+$s = $shell.CreateShortcut("$desktop\\Restart Ultrasound Services.lnk")
+$s.TargetPath = {ps_quote(ROOT / 'Restart Services.bat')}
+$s.WorkingDirectory = {ps_quote(ROOT)}
+$s.IconLocation = 'shell32.dll,238'
+$s.Description = 'Restart Orthanc, report pipeline and dashboard'
+$s.Save()
+Set-Content -Path "$desktop\\Ultrasound Dashboard.url" -Value "[InternetShortcut]`r`nURL=http://localhost:{DASHBOARD_PORT}/"
+"""
+    r = run_powershell(script)
+    if r.returncode == 0:
+        ok("'Ultrasound Dashboard' and 'Restart Ultrasound Services' on the Desktop")
+    else:
+        warn(f"Could not create the Desktop shortcuts: {r.stderr.strip()}")
+
+
+# ---------------------------------------------------------------------------
+# 9. Dashboard check + first login
 # ---------------------------------------------------------------------------
 
 def wait_for_dashboard(timeout=90):
@@ -281,7 +375,7 @@ def finish(cfg):
         kind = "Tailscale" if is_tailscale(ip) else "clinic LAN"
         print(f"  From the {kind}:{' ' * (12 - len(kind))}http://{ip}:{DASHBOARD_PORT}")
 
-    if SETUP_TOKEN_FILE.exists():
+    if SETUP_TOKEN_FILE.exists() and getattr(cfg, "DASHBOARD_LOGIN_REQUIRED", True):
         token = SETUP_TOKEN_FILE.read_text(encoding="utf-8").strip()
         print("\n  FIRST LOGIN - open the dashboard and enter this setup token:")
         print(f"\n      {token}\n")
@@ -302,7 +396,10 @@ def main():
     cfg = configure()
     setup_firewall(cfg)
     setup_power()
+    setup_tesseract()
+    setup_word()
     register_tasks()
+    create_shortcuts()
     finish(cfg)
 
 

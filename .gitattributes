@@ -7,3 +7,8 @@ VERSION export-subst
 # Dev-only files, left out of the release zip
 .gitignore export-ignore
 .gitattributes export-ignore
+# Not for clinics: Docker setup and the old installer (setup.bat replaces it)
+Dockerfile export-ignore
+docker-compose.yml export-ignore
+deploy.bat export-ignore
+install.bat export-ignore
