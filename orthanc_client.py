@@ -88,6 +88,18 @@ class OrthancClient:
         resp.raise_for_status()
         return resp.json()
 
+    def study_exists(self, study_id: str) -> bool:
+        resp = self.session.get(f"{self.url}/studies/{study_id}")
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return True
+
+    def delete_study(self, study_id: str) -> None:
+        """Delete a study and all its images from Orthanc."""
+        resp = self.session.delete(f"{self.url}/studies/{study_id}")
+        resp.raise_for_status()
+
     def find_studies(
         self,
         patient_name: str = None,
@@ -241,6 +253,7 @@ class OrthancClient:
         poll_interval: float = None,
         since: Optional[int] = None,
         state_file: str = None,
+        on_idle=None,
     ):
         """
         Poll Orthanc for 'StableStudy' events and invoke callback for each.
@@ -294,6 +307,11 @@ class OrthancClient:
 
                 if changes["Done"]:
                     self._send_heartbeat()
+                    if on_idle:
+                        try:
+                            on_idle()
+                        except Exception as e:
+                            print(f"  [ERROR] {e}")
                     time.sleep(poll_interval)
 
         except KeyboardInterrupt:

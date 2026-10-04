@@ -450,6 +450,9 @@ def study_page(
         remade=bool(remade),
         error={
             "no-orthanc": "This scan was not loaded from Orthanc, so its report can't be remade here.",
+            "removed": "This scan's images were removed from Orthanc to save space "
+                       f"({getattr(config, 'ORTHANC_KEEP_DAYS', 30)} days after the report was reviewed), "
+                       "so the report can't be remade. Edit the report here instead.",
             "remake": "Could not remake the report - Orthanc may be unreachable. Details are in the dashboard log.",
         }.get(error, ""),
     )
@@ -534,7 +537,10 @@ def change_report_type(
     import pipeline
     from orthanc_client import OrthancClient
     try:
-        pipeline.process_orthanc_study(OrthancClient(), study["orthanc_study_id"], scan_type=scan_type)
+        client = OrthancClient()
+        if not client.study_exists(study["orthanc_study_id"]):
+            return RedirectResponse(f"/study/{study_id}?error=removed", status_code=303)
+        pipeline.process_orthanc_study(client, study["orthanc_study_id"], scan_type=scan_type)
     except Exception as e:
         print(f"[dashboard] Remaking report as {scan_type} failed: {e}")
         return RedirectResponse(f"/study/{study_id}?error=remake", status_code=303)

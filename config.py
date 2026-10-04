@@ -25,6 +25,10 @@ DICOM_CACHE_DIR = "dicom_cache"    # Temp folder for downloaded DICOM files
 POLL_INTERVAL_SECONDS = 10          # How often to check Orthanc for new studies
 STABLE_STUDY_TIMEOUT = 30           # Seconds to wait after last instance before processing
 WATCH_STATE_FILE = "watch_state.json"  # Persists watch mode's position across restarts
+# Days a scan stays in Orthanc after its report was reviewed by the doctor;
+# then its DICOM images are deleted from Orthanc to save disk space (the
+# report and the dashboard's image copies are kept). 0 = never delete.
+ORTHANC_KEEP_DAYS = 30
 MAX_REPORT_IMAGES = 6                # Max representative scan images embedded per report
 HEARTBEAT_URL = ""                   # Dead-man's-switch ping URL (e.g. healthchecks.io) - see config_local.example.py
 

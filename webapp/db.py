@@ -332,6 +332,19 @@ def edited_report_path(orthanc_study_id: str) -> Optional[str]:
         return report.file_path if status == "reviewed" else None
 
 
+def reviewed_orthanc_studies() -> list[str]:
+    """Orthanc ids of scans whose Word report the doctor has edited and saved."""
+    with SessionLocal() as session:
+        ids = []
+        for study in session.query(Study).filter(Study.orthanc_study_id != "").all():
+            report = _primary_report(study)
+            if report is None or report.report_type != "docx" or not Path(report.file_path).exists():
+                continue
+            if _document_status(report.report_type, report.file_path, report.generated_at) == "reviewed":
+                ids.append(study.orthanc_study_id)
+        return ids
+
+
 def get_study(clinic_id: int, study_id: int) -> Optional[dict]:
     """One scan with its record, numbered as on its day's list."""
     with SessionLocal() as session:

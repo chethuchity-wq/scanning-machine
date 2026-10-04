@@ -40,7 +40,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pydicom
@@ -1127,6 +1127,36 @@ def process_local_folder(folder_path: str) -> Path:
     return report_path
 
 
+def cleanup_orthanc(client: OrthancClient, keep_days: int = None) -> int:
+    """
+    Delete from Orthanc the scans whose report the doctor has reviewed and
+    that arrived more than `keep_days` ago, to save disk space. The Word
+    report and the dashboard's copies of the images (scan_data) stay; only
+    "Remake report" is no longer possible for them. Returns how many were deleted.
+    """
+    keep_days = config.ORTHANC_KEEP_DAYS if keep_days is None else keep_days
+    if not keep_days or keep_days <= 0:
+        return 0
+    cutoff = datetime.now() - timedelta(days=keep_days)
+    deleted = 0
+    for study_id in dashboard_db.reviewed_orthanc_studies():
+        try:
+            if not client.study_exists(study_id):
+                continue
+            received = client.get_study(study_id).get("LastUpdate", "")
+            if not received or datetime.strptime(received[:8], "%Y%m%d") > cutoff:
+                continue
+            # Keep the images in Orthanc if the dashboard has no copy of them
+            if not (scan_data_dir(study_id) / "scan.json").exists():
+                continue
+            client.delete_study(study_id)
+            deleted += 1
+            print(f"  [CLEANUP] Removed from Orthanc (reviewed, received {received[:8]}): {study_id}")
+        except Exception as e:
+            print(f"  [CLEANUP] Could not remove {study_id}: {e}")
+    return deleted
+
+
 def watch_orthanc():
     """
     Watch Orthanc for new stable studies and auto-generate reports.
@@ -1162,8 +1192,20 @@ def watch_orthanc():
         except Exception as e:
             print(f"  ✗ Failed to process study {study_id}: {e}")
 
+    # Once a day, while idle: remove reviewed scans older than ORTHANC_KEEP_DAYS
+    last_cleanup = {"day": None}
+
+    def daily_cleanup():
+        today = datetime.now().date()
+        if last_cleanup["day"] == today:
+            return
+        last_cleanup["day"] = today
+        removed = cleanup_orthanc(client)
+        if removed:
+            print(f"  [CLEANUP] {removed} scan(s) removed from Orthanc")
+
     # Start watching
-    client.watch_for_stable_studies(callback=on_stable_study)
+    client.watch_for_stable_studies(callback=on_stable_study, on_idle=daily_cleanup)
 
 
 def list_recent_studies(limit: int = 20):
