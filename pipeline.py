@@ -470,6 +470,8 @@ def _build_docx_data(
         # sex drives declaration pronoun: "F" -> "her", "M" -> "his"
         "_sex": patient_info.get("sex", "F"),
         "_images": images or [],
+        # Where the Word report is saved (dashboard Settings); blank = locally
+        "_report_folder": clinic_info.get("report_folder", ""),
     }
     warnings: list[str] = []
     # "Uterus Length/Width/Height" -> one "L x W x H" size; set first, so the
@@ -601,6 +603,7 @@ def _compute_review_flags(
     dropped_measurements: int = 0,
     doctor_name_missing: bool = False,
     date_warning: str = "",
+    folder_warning: str = "",
 ) -> tuple[bool, str]:
     """
     Flag reports whose *generation succeeded* but whose content looks
@@ -637,7 +640,22 @@ def _compute_review_flags(
     if date_warning:
         reasons.append(date_warning)
 
+    if folder_warning:
+        reasons.append(folder_warning)
+
     return bool(reasons), "; ".join(reasons)
+
+
+def _report_folder_warning(clinic_info: dict, path) -> str:
+    """A report saved locally because the report folder in Settings could not be used."""
+    folder = (clinic_info.get("report_folder") or "").strip()
+    if not folder or path is None:
+        return ""
+    try:
+        Path(path).resolve().relative_to(Path(folder).resolve())
+        return ""
+    except (ValueError, OSError):
+        return f"report folder {folder} not reachable - saved on this PC instead"
 
 
 def _scanner_date_warning(study_date: str, received: str) -> str:
@@ -938,6 +956,7 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
         scan_type, confidence, len(all_measurements), len(report_images),
         docx_path is not None, dropped_measurements=dropped,
         doctor_name_missing=not (clinic_info.get("doctor_name") or "").strip(),
+        folder_warning=_report_folder_warning(clinic_info, docx_path),
         date_warning=_scanner_date_warning(patient_info.get("study_date", ""), summary.get("received", "")),
     )
     if needs_review:
@@ -1070,6 +1089,7 @@ def process_local_folder(folder_path: str) -> Path:
         scan_type, confidence, len(all_measurements), len(report_images),
         docx_path is not None, dropped_measurements=dropped,
         doctor_name_missing=not (clinic_info.get("doctor_name") or "").strip(),
+        folder_warning=_report_folder_warning(clinic_info, docx_path),
     )
     if needs_review:
         print(f"  [REVIEW] Flagged: {review_reason}")

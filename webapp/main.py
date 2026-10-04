@@ -605,6 +605,27 @@ def report_pdf(report_id: int, user: dict = Depends(require_login)):
 # Settings
 # ---------------------------------------------------------------------------
 
+def _local_report_folder() -> str:
+    return str(Path(config.OUTPUT_DIR, "filled").resolve())
+
+
+def _check_report_folder(folder: str) -> str:
+    """'' if reports can be saved in `folder` (created if missing), else why not."""
+    if not folder:
+        return ""
+    path = Path(folder)
+    if not path.is_absolute():
+        return f"Use a full path, e.g. D:\\Reports or \\\\PC-NAME\\Reports - not \"{folder}\"."
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / f".write-test-{secrets.token_hex(4)}"
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as e:
+        return f"Cannot save reports in {folder}: {e.strerror or e}. Not saved - check the path and that this PC can write there."
+    return ""
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_form(request: Request, user: dict = Depends(require_login)):
     clinic = db.get_clinic_info(user["clinic_id"])
@@ -615,6 +636,7 @@ def settings_form(request: Request, user: dict = Depends(require_login)):
             "user": user,
             "clinic": clinic,
             "orthanc_url": getattr(config, "ORTHANC_URL", ""),
+            "local_folder": _local_report_folder(),
             "saved": False,
             "csrf_token": csrf_token(request),
         },
@@ -631,11 +653,13 @@ def settings_submit(
     doctor_name: str = Form(""),
     doctor_qual: str = Form(""),
     referring_default: str = Form(""),
+    report_folder: str = Form(""),
     csrf_token_field: str = Form(..., alias="csrf_token"),
 ):
     check_csrf(request, csrf_token_field)
-    db.update_clinic_info(
-        user["clinic_id"],
+    folder = report_folder.strip().strip('"')
+    folder_error = _check_report_folder(folder)
+    fields = dict(
         name=name.strip(),
         address=address.strip(),
         phone=phone.strip(),
@@ -643,18 +667,23 @@ def settings_submit(
         doctor_qual=doctor_qual.strip(),
         referring_default=referring_default.strip(),
     )
+    # A folder reports can't be written to is not saved: the old one stays
+    if not folder_error:
+        fields["report_folder"] = folder
+    db.update_clinic_info(user["clinic_id"], **fields)
     clinic = db.get_clinic_info(user["clinic_id"])
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-            "user": user,
-            "clinic": clinic,
-            "orthanc_url": getattr(config, "ORTHANC_URL", ""),
-            "saved": True,
-            "csrf_token": csrf_token(request),
-        },
-    )
+    context = {
+        "user": user,
+        "clinic": clinic,
+        "orthanc_url": getattr(config, "ORTHANC_URL", ""),
+        "local_folder": _local_report_folder(),
+        "saved": not folder_error,
+        "folder_error": folder_error,
+        "csrf_token": csrf_token(request),
+    }
+    if folder_error:
+        context["report_folder_input"] = folder
+    return templates.TemplateResponse(request, "settings.html", context)
 
 
 # ---------------------------------------------------------------------------

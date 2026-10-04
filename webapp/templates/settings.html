@@ -19,6 +19,16 @@
   <label>Doctor name <input type="text" name="doctor_name" value="{{ clinic.doctor_name or '' }}" placeholder="Dr. A.B. Name"></label>
   <label>Qualification <input type="text" name="doctor_qual" value="{{ clinic.doctor_qual or '' }}" placeholder="MBBS. MDRD."></label>
   <label>Default "Ref by" <input type="text" name="referring_default" value="{{ clinic.referring_default or '' }}" placeholder="Used when the scan has no referring doctor"></label>
+
+  <h2>Report Folder</h2>
+  <p class="hint">
+    Folder the Word and PDF reports are saved in, e.g. <code>D:\Reports</code> or a
+    shared folder <code>\\PC-NAME\Reports</code> (use the full <code>\\</code> path, not a
+    mapped drive letter). Leave blank to save them on this PC in
+    <code>{{ local_folder }}</code>. Applies to new reports; earlier ones stay where they are.
+  </p>
+  {% if folder_error %}<p class="error">{{ folder_error }}</p>{% endif %}
+  <label>Report folder <input type="text" name="report_folder" value="{{ report_folder_input if report_folder_input is defined else (clinic.report_folder or '') }}" placeholder="Blank = this PC ({{ local_folder }})"></label>
   <button type="submit">Save</button>
 </form>
 

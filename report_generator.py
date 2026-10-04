@@ -434,8 +434,14 @@ def generate_report(
     """
     # Determine output path
     if output_path is None:
-        output_dir = Path(config.OUTPUT_DIR)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # The report folder set in the dashboard's Settings, else the local one
+        output_dir = Path((clinic_info or {}).get("report_folder") or config.OUTPUT_DIR)
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"  [REPORT] Cannot use the report folder {output_dir}: {e} - saving locally")
+            output_dir = Path(config.OUTPUT_DIR)
+            output_dir.mkdir(parents=True, exist_ok=True)
 
         raw_name = patient_info.get("patient_name", "unknown").replace("^", " ")
         # Strip characters that are illegal in Windows filenames - DICOM

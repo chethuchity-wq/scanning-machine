@@ -291,13 +291,27 @@ def _non_clobbering_path(path: Path) -> Path:
     raise FileExistsError(f"Could not find a free filename for {path}")
 
 
-def _save(doc: Document, patient_name: str, scan_type: str, date: str = "") -> Path:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def _save(doc: Document, patient_name: str, scan_type: str, date: str = "", folder: str = "") -> Path:
+    """
+    Save into `folder` (the report folder set in the dashboard's Settings), or
+    reports/filled when none is set. If that folder can't be written (e.g. a
+    network share that is down) the report is saved locally instead - the
+    pipeline flags it - rather than being lost.
+    """
     safe_name = "".join(c for c in patient_name if c.isalnum() or c in " ._-").strip()
     # Prefer the report's own date over today's - a study processed the day
     # after it was acquired should still be filed under the scan date.
     date_str = _date_for_filename(date)
     filename = f"{safe_name}_{scan_type}_{date_str}.docx"
+    if folder:
+        try:
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            path = _non_clobbering_path(Path(folder) / filename)
+            doc.save(path)
+            return path
+        except OSError as e:
+            print(f"  [DOCX] Cannot save in the report folder {folder}: {e} - saving locally")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     path = _non_clobbering_path(OUTPUT_DIR / filename)
     doc.save(path)
     return path
@@ -379,7 +393,7 @@ def generate_early_pregnancy_report(data: dict) -> Path:
     _declaration(doc, d)
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
-    return _save(doc, d.get("patient_name", "patient"), "early_pregnancy", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "early_pregnancy", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +476,7 @@ def generate_nt_scan_report(data: dict) -> Path:
     _declaration(doc, d)
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
-    return _save(doc, d.get("patient_name", "patient"), "nt_scan", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "nt_scan", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +615,7 @@ def generate_anomaly_scan_report(data: dict) -> Path:
     _declaration(doc, d)
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
-    return _save(doc, d.get("patient_name", "patient"), "anomaly_scan", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "anomaly_scan", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +719,7 @@ def generate_growth_scan_report(data: dict) -> Path:
     ])
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
-    return _save(doc, d.get("patient_name", "patient"), "growth_scan", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "growth_scan", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +797,7 @@ def generate_follicular_study_report(data: dict) -> Path:
 
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
-    return _save(doc, d.get("patient_name", "patient"), "follicular_study", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "follicular_study", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -863,7 +877,7 @@ def generate_abdomen_pelvis_female_report(data: dict) -> Path:
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
 
-    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_female", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_female", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -939,7 +953,7 @@ def generate_abdomen_pelvis_male_report(data: dict) -> Path:
     _add_images_section(doc, d.get("_images"))
     _doctor_signature(doc, d)
 
-    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_male", d.get("date", ""))
+    return _save(doc, d.get("patient_name", "patient"), "abdomen_pelvis_male", d.get("date", ""), d.get("_report_folder", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -1068,7 +1082,8 @@ def generate_report(scan_type: str, data: dict) -> Path:
     if template.exists():
         doc = _fill_template(template, data)
         _add_images_section(doc, data.get("_images"))
-        return _save(doc, data.get("patient_name", "patient"), scan_type, data.get("date", ""))
+        return _save(doc, data.get("patient_name", "patient"), scan_type, data.get("date", ""),
+                     data.get("_report_folder", ""))
     return SCAN_GENERATORS[scan_type](data)
 
 

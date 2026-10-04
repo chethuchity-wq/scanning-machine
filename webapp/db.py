@@ -42,6 +42,8 @@ class Clinic(Base):
     doctor_name: Mapped[str] = mapped_column(String(200), default="")
     doctor_qual: Mapped[str] = mapped_column(String(200), default="")
     referring_default: Mapped[str] = mapped_column(String(200), default="")
+    # Folder the reports are saved in; blank = reports/ on this PC
+    report_folder: Mapped[str] = mapped_column(String(1000), default="")
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 
@@ -130,6 +132,8 @@ def _migrate_add_doctor_columns() -> None:
                     text(f"UPDATE clinics SET {column} = :value"),
                     {"value": getattr(config, config_key, "") or ""},
                 )
+        if "report_folder" not in existing:
+            conn.execute(text("ALTER TABLE clinics ADD COLUMN report_folder VARCHAR(1000) DEFAULT ''"))
 
 
 def init_db() -> None:
@@ -172,6 +176,7 @@ def get_clinic_info(clinic_id: int) -> dict:
             "doctor_name": clinic.doctor_name,
             "doctor_qual": clinic.doctor_qual,
             "referring_default": clinic.referring_default,
+            "report_folder": clinic.report_folder or "",
         }
 
 
