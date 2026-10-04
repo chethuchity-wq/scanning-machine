@@ -26,7 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import config
 import docx_pdf
 import measurement_rules
-from webapp import db, docx_editor
+from webapp import db, docx_editor, report_images
 from webapp.auth import hash_password, verify_password
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -432,6 +432,12 @@ def study_page(
     if study["report_type"] == "docx" and Path(study["file_path"]).exists():
         document = docx_editor.render(study["file_path"])
     scan = _scan_data(study)
+    in_report: list[str] = []
+    if document and scan and scan.get("images"):
+        try:
+            in_report = report_images.images_in_report(study["file_path"], _scan_data_dir(study))
+        except Exception as e:
+            print(f"[dashboard] Could not read the report's images: {e}")
     siblings = db.list_day_studies(user["clinic_id"], study["study_date"])
     ids = [s["study_id"] for s in siblings]
     i = ids.index(study_id) if study_id in ids else -1
@@ -440,6 +446,7 @@ def study_page(
         study=study,
         document=document,
         scan=scan,
+        in_report=in_report,
         # Guesses only when the scanner sent no labelled values to fill from
         suggestions=measurement_rules.suggest(scan["images"], study["scan_type"])
         if scan and document and not scan.get("report_values") else [],
@@ -511,6 +518,33 @@ async def save_study_document(request: Request, study_id: int, user: dict = Depe
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"version": version, "saved_at": datetime.now().strftime("%H:%M")}
+
+
+@app.post("/study/{study_id}/report-images")
+async def set_report_image(request: Request, study_id: int, user: dict = Depends(require_login)):
+    """Add a scan image to the Word report, or remove one; returns the re-read editor content."""
+    check_csrf(request, request.headers.get("X-CSRF-Token", ""))
+    study = _study_or_404(user, study_id)
+    folder = _scan_data_dir(study)
+    if study["report_type"] != "docx" or folder is None:
+        raise HTTPException(status_code=404, detail="This scan has no Word report")
+    payload = await request.json()
+    name = str(payload.get("file", ""))
+    if not re.fullmatch(r"image_\d{2,3}\.jpg", name):
+        raise HTTPException(status_code=400, detail="Unknown image")
+    if docx_editor.version_of(study["file_path"]) != str(payload.get("version", "")):
+        raise HTTPException(
+            status_code=409,
+            detail="The report was changed elsewhere (e.g. in Word) since you opened it. Reload the page.",
+        )
+    try:
+        included = report_images.set_image(study["file_path"], folder, name, bool(payload.get("include")))
+    except PermissionError:
+        raise HTTPException(status_code=423, detail="The report is open in Word. Close it in Word, then try again.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {**docx_editor.render(study["file_path"]), "in_report": included,
+            "saved_at": datetime.now().strftime("%H:%M")}
 
 
 @app.post("/study/{study_id}/report-type")

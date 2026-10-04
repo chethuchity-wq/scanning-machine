@@ -208,27 +208,38 @@ def _doppler_table(doc: Document, rows: list[tuple[str, str]]) -> None:
         table.rows[i].cells[1].text = pi
 
 
-def _add_images_section(doc: Document, images: list[bytes] | None, images_per_row: int = 2) -> None:
-    """Append a grid of representative ultrasound scan images, if any were provided."""
+IMAGES_HEADING = "ULTRASOUND IMAGES"
+
+
+def _add_images_section(doc: Document, images: list | None, images_per_row: int = 2) -> None:
+    """
+    Append a grid of ultrasound scan images, if any were provided. Each item
+    is the image bytes, or (scan image name, bytes): the name ("image_03.jpg",
+    as in the dashboard's scan panel) is stored as the picture's description,
+    so the dashboard knows which scan images are in the report.
+    """
     if not images:
         return
 
     # Images on their own page, so they never split the report text
     doc.add_page_break()
-    _heading(doc, "ULTRASOUND IMAGES", size=14)
+    _heading(doc, IMAGES_HEADING, size=14)
 
     image_width = Inches(3.1)
     for row_start in range(0, len(images), images_per_row):
         row_images = images[row_start:row_start + images_per_row]
         table = doc.add_table(rows=1, cols=images_per_row)
-        for col, img_bytes in enumerate(row_images):
+        for col, item in enumerate(row_images):
+            name, img_bytes = item if isinstance(item, tuple) else ("", item)
             paragraph = table.rows[0].cells[col].paragraphs[0]
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = paragraph.add_run()
             try:
-                run.add_picture(io.BytesIO(img_bytes), width=image_width)
+                shape = run.add_picture(io.BytesIO(img_bytes), width=image_width)
             except Exception:
                 continue
+            if name:
+                shape._inline.docPr.set("descr", name)
 
 
 def _doctor(d: dict) -> tuple[str, str]:

@@ -502,6 +502,51 @@
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Scan images in the report: each image in the panel can be added to the
+  // report's images page or taken out. Unsaved text is saved first; the
+  // server rebuilds the images page and the editor shows the result.
+  // ---------------------------------------------------------------------------
+  function markInReport(names) {
+    document.querySelectorAll(".scan-image").forEach(function (fig) {
+      var inside = names.indexOf(fig.dataset.file) !== -1;
+      fig.classList.toggle("in-report", inside);
+      var btn = fig.querySelector(".img-toggle");
+      if (btn) btn.textContent = inside ? "✓ In report - remove" : "+ Add to report";
+    });
+  }
+  document.querySelectorAll(".img-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var include = !btn.closest(".scan-image").classList.contains("in-report");
+      document.querySelectorAll(".img-toggle").forEach(function (b) { b.disabled = true; });
+      showState(include ? "Adding image…" : "Removing image…");
+      save().then(function (ok) {
+        if (!ok) throw new Error("Save the report first");
+        return fetch("/study/" + ed.dataset.url.split("/")[2] + "/report-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": ed.dataset.csrf },
+          body: JSON.stringify({ file: btn.dataset.file, include: include, version: version }),
+        });
+      }).then(function (res) {
+        return res.json().catch(function () { return { detail: res.statusText }; }).then(function (data) {
+          if (!res.ok) throw new Error(data.detail || "Could not change the images");
+          ed.innerHTML = data.html;
+          version = data.version;
+          ed.dataset.paragraphs = ed.querySelectorAll("p[data-pid]").length;
+          markInReport(data.in_report);
+          savedText = "Saved at " + data.saved_at;
+          setDirty(false);
+          markReviewed();
+          scheduleMarks();
+        });
+      }).catch(function (err) {
+        showState("⚠ " + err.message, "error");
+      }).then(function () {
+        document.querySelectorAll(".img-toggle").forEach(function (b) { b.disabled = false; });
+      });
+    });
+  });
+
   window.__editorDirty = function () { return dirty; };
   window.addEventListener("beforeunload", function (e) {
     if (dirty && !window.__skipUnloadWarning) { e.preventDefault(); e.returnValue = ""; }

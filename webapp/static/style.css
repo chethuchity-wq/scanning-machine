@@ -604,3 +604,21 @@ a.patient:hover { color: var(--blue); text-decoration: underline; }
 }
 
 .btn-icon { vertical-align: -2px; margin-right: 2px; }
+
+/* Scan image in the report / add to report */
+.img-toggle {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--blue);
+  font: inherit;
+  font-size: 0.78em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.img-toggle:hover { background: #f1f5f8; }
+.img-toggle:disabled { opacity: 0.6; cursor: default; }
+.scan-image.in-report img { outline: 3px solid #3a9d5d; outline-offset: -3px; }
+.scan-image.in-report .img-toggle { color: #2f7d4a; border-color: #9fd3b0; background: #eef8f1; }

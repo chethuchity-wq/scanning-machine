@@ -679,6 +679,11 @@ SCAN_DATA_DIR = Path(config.OUTPUT_DIR) / "scan_data"
 _NON_CLINICAL_RE = re.compile(r"\b(id|name|sex|date|exam)\b", re.I)
 
 
+def scan_image_name(n: int) -> str:
+    """File name of the scan's n-th image (1-based, in the order taken) in scan_data."""
+    return f"image_{n:02d}.jpg"
+
+
 def scan_data_dir(orthanc_study_id: str) -> Path:
     return SCAN_DATA_DIR / re.sub(r"[^A-Za-z0-9-]", "", orthanc_study_id)
 
@@ -699,7 +704,7 @@ def _save_scan_data(study_id: str, scan_images: list[dict], measurements: list[d
             old.unlink()
         images = []
         for n, item in enumerate(sorted(scan_images, key=lambda i: i["order"]), 1):
-            name = f"image_{n:02d}.jpg"
+            name = scan_image_name(n)
             Image.open(io.BytesIO(item["png"])).convert("RGB").save(folder / name, "JPEG", quality=85)
             images.append({
                 "file": name,
@@ -864,7 +869,6 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
 
     # Process all instances in the study
     all_measurements = []
-    report_images: list[bytes] = []
     patient_info = None
     last_ds = None
     # Classify from an image: only images carry the scanner preset
@@ -899,11 +903,8 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
             print(f"    -> {len(measurements)} measurement(s) from instance {instance_id[:8]}...")
             all_measurements.extend(measurements)
 
-        # Collect scan images (skips SR - no pixel data); the first
-        # few also go at the end of the Word report
+        # Collect scan images (skips SR - no pixel data)
         if png_bytes:
-            if len(report_images) < config.MAX_REPORT_IMAGES:
-                report_images.append(png_bytes)
             scan_images.append({
                 "png": png_bytes,
                 "order": (str(ds.get("ContentTime", "")), int(ds.get("InstanceNumber", 0) or 0)),
@@ -912,6 +913,13 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
             })
 
     _save_scan_data(study_id, scan_images, all_measurements)
+    # The first few, in the order they were taken, go at the end of the Word
+    # report - named as in the dashboard's scan panel, where the doctor can
+    # add or remove images
+    report_images = [
+        (scan_image_name(n), item["png"])
+        for n, item in enumerate(sorted(scan_images, key=lambda i: i["order"]), 1)
+    ][:config.MAX_REPORT_IMAGES]
 
     # Late images for a scan whose report the doctor already edited: the
     # dashboard's image panel is updated (above), but a new report would
@@ -979,7 +987,8 @@ def process_orthanc_study(client: OrthancClient, study_id: str, scan_type: str |
             review_reason=review_reason,
         )
     else:
-        report_path = generate_report(patient_info, all_measurements, images=report_images, clinic_info=clinic_info)
+        report_path = generate_report(patient_info, all_measurements, images=[png for _, png in report_images],
+                                      clinic_info=clinic_info)
         print(f"  PDF report: {report_path}")
         dashboard_db.record_report(
             clinic_id=clinic_id,

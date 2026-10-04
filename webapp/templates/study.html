@@ -123,12 +123,14 @@
         </section>
         {% endif %}
         {% for img in scan.images %}
-        <figure class="scan-image" data-file="{{ img.file }}">
+        <figure class="scan-image{{ ' in-report' if img.file in in_report }}" data-file="{{ img.file }}">
           <a href="/study/{{ study.study_id }}/scan/{{ img.file }}" target="_blank" title="Open full size">
             <img src="/study/{{ study.study_id }}/scan/{{ img.file }}" alt="Scan image {{ loop.index }}" loading="lazy">
           </a>
           <figcaption>
             <span class="img-no">Image {{ loop.index }}</span>
+            {% if document %}<button type="button" class="img-toggle" data-file="{{ img.file }}"
+              title="Add this image to the report's images page, or take it out">{{ '&#10003; In report - remove' if img.file in in_report else '+ Add to report' }}</button>{% endif %}
             {% if img['values'] %}
             <span class="chips">
               {% for v in img['values'] %}<button type="button" class="value-chip{{ ' named' if v.name not in ('Dist', 'Dist1', 'Dist2', 'Dist3', 'Volume') }}" data-value="{{ v.value }}" title="{{ v.name }} - click to put in the report">{% if v.name not in ('Dist', 'Dist1', 'Dist2', 'Dist3', 'Volume') %}<span class="cn">{{ v.name }}</span> {% endif %}{{ v.value }} {{ v.unit }}</button>{% endfor %}
@@ -143,4 +145,4 @@
   </section>
 </div>
 {% endblock %}
-{% block scripts %}<script src="/static/app.js?v=2"></script>{% endblock %}
+{% block scripts %}<script src="/static/app.js?v=3"></script>{% endblock %}
